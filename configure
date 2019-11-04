@@ -42,7 +42,7 @@ platform="generic"
 builtin_gpu_list="peops unai neon"
 builtin_gpu=""
 sound_driver_list="oss alsa pulseaudio sdl libretro"
-sound_drivers=""
+sound_drivers="sdl"
 plugins="plugins/spunull/spunull.so \
 plugins/dfxvideo/gpu_peops.so plugins/gpu_unai/gpu_unai.so"
 ram_fixed="no"

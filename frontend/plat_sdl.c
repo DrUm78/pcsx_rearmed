@@ -27,13 +27,6 @@
 #include "plat.h"
 #include "revision.h"
 
-#define RES_HW_SCREEN_HORIZONTAL  240
-#define RES_HW_SCREEN_VERTICAL    240
-
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define ABS(x) (((x) < 0) ? (-x) : (x))
-
 #define BLACKER_BLACKS
 
 static const struct in_default_bind in_sdl_defbinds[] = {
@@ -126,17 +119,18 @@ static void *shadow_fb, *menubg_img;
 static int in_menu;
 
 SDL_Surface * hw_screen = NULL;
+SDL_Surface *virtual_hw_screen = NULL;
 
 
-void clear_hw_screen(uint16_t color)
+void clear_hw_screen(SDL_Surface *screen, uint16_t color)
 {
-  if(hw_screen){
-    uint16_t *dest_ptr = (uint16_t *)hw_screen->pixels;
+  if(screen){
+    uint16_t *dest_ptr = (uint16_t *)screen->pixels;
     uint32_t x, y;
 
-    for(y = 0; y < hw_screen->h; y++)
+    for(y = 0; y < screen->h; y++)
     {
-      for(x = 0; x < hw_screen->w; x++, dest_ptr++)
+      for(x = 0; x < screen->w; x++, dest_ptr++)
       {
         *dest_ptr = color;
       }
@@ -158,7 +152,7 @@ static int change_video_mode(int force)
     h = psx_h;
   }
 
-  clear_hw_screen(0);
+  clear_hw_screen(virtual_hw_screen, 0);
   return plat_sdl_change_video_mode(w, h, force);
 }
 
@@ -204,6 +198,18 @@ void plat_init(void)
   }
 
   hw_screen = SDL_SetVideoMode(RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL, 16, SDL_FULLSCREEN | SDL_HWSURFACE | SDL_DOUBLEBUF);
+  if(hw_screen == NULL)
+  {
+        printf("Error SDL_SetVideoMode: %s\n", SDL_GetError());
+        exit(EXIT_FAILURE);
+  }
+
+  virtual_hw_screen = SDL_CreateRGBSurface(SDL_SWSURFACE, RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL, 16, 0xFFFF, 0xFFFF, 0xFFFF, 0);
+  if(virtual_hw_screen == NULL)
+  {
+        printf("Error creating virtual_hw_screen: %s\n", SDL_GetError());
+        exit(EXIT_FAILURE);
+  }
 
   in_menu = 1;
   SDL_WM_SetCaption("PCSX-ReARMed " REV, NULL);
@@ -233,11 +239,13 @@ void plat_init(void)
 
 void plat_finish(void)
 {
+  SDL_FreeSurface(virtual_hw_screen);
   deinit_menu_SDL();
   free(shadow_fb);
   shadow_fb = NULL;
   free(menubg_img);
   menubg_img = NULL;
+  TTF_Quit();
   plat_sdl_finish();
 }
 
@@ -1417,6 +1425,29 @@ void flip_NNOptimized_FullBilinear_GaussianWeighted(SDL_Surface *virtual_screen,
 }
 
 
+void SDL_Copy_Rotate_270(uint16_t *source_pixels, uint16_t *dest_pixels,
+                int src_w, int src_h, int dst_w, int dst_h){
+  int i, j;
+
+    /// --- Checking if same dimensions ---
+    if(dst_w != src_w || dst_h != src_h){
+      printf("Error in SDL_Rotate_270, dest_pixels (%dx%d) and source_pixels (%dx%d) have different dimensions\n",
+        dst_w, dst_h, src_w, src_h);
+      return;
+    }
+
+  /// --- Pixel copy and rotation (270) ---
+  uint16_t *cur_p_src, *cur_p_dst;
+  for(i=0; i<src_h; i++){
+    for(j=0; j<src_w; j++){
+      cur_p_src = source_pixels + i*src_w + j;
+      cur_p_dst = dest_pixels + (dst_h-1-j)*dst_w + i;
+      *cur_p_dst = *cur_p_src;
+    }
+  }
+}
+
+
 void *plat_gvideo_flip(void)
 {
   if (plat_sdl_overlay != NULL) {
@@ -1433,24 +1464,26 @@ void *plat_gvideo_flip(void)
     //printf("w:%d,h:%d\n", plat_sdl_screen->w, plat_sdl_screen->h);
 
     /* Lock the screen for direct access to the pixels */
-    if ( SDL_MUSTLOCK(hw_screen) ) {
+    /*if ( SDL_MUSTLOCK(hw_screen) ) {
         if ( SDL_LockSurface(hw_screen) < 0 ) {
             fprintf(stderr, "Can't lock screen: %s\n", SDL_GetError());
             return NULL;
         }
-    }
+    }*/
 
     /// --------------Optimized Flip depending on aspect ratio -------------
     static int prev_aspect_ratio;
     if(prev_aspect_ratio != aspect_ratio || need_screen_cleared){
-      clear_hw_screen(0);
+      clear_hw_screen(virtual_hw_screen, 0);
       prev_aspect_ratio = aspect_ratio;
       need_screen_cleared = 0;
     }
 
     switch(aspect_ratio){
       case ASPECT_RATIOS_TYPE_STRECHED:
-      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
+      /*flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, virtual_hw_screen,
+        RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);*/
+      flip_NNOptimized_LeftAndRightBilinear(plat_sdl_screen, virtual_hw_screen,
         RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);
       break;
       case ASPECT_RATIOS_TYPE_MANUAL:
@@ -1458,32 +1491,36 @@ void *plat_gvideo_flip(void)
                               RES_HW_SCREEN_VERTICAL);
       uint32_t h_zoomed = MIN(h_scaled + aspect_ratio_factor_percent*(RES_HW_SCREEN_VERTICAL - h_scaled)/100,
                               RES_HW_SCREEN_VERTICAL);
-      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
+      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, virtual_hw_screen,
           MAX(plat_sdl_screen->w*h_zoomed/plat_sdl_screen->h, RES_HW_SCREEN_HORIZONTAL),
           MIN(h_zoomed, RES_HW_SCREEN_VERTICAL));
       break;
       case ASPECT_RATIOS_TYPE_CROPPED:
-      flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, hw_screen,
+      flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, virtual_hw_screen,
         MAX(plat_sdl_screen->w*RES_HW_SCREEN_VERTICAL/plat_sdl_screen->h, RES_HW_SCREEN_HORIZONTAL),
         RES_HW_SCREEN_VERTICAL);
       break;
       case ASPECT_RATIOS_TYPE_SCALED:
-      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
+      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, virtual_hw_screen,
         RES_HW_SCREEN_HORIZONTAL,
         MIN(plat_sdl_screen->h*RES_HW_SCREEN_HORIZONTAL/plat_sdl_screen->w, RES_HW_SCREEN_VERTICAL));
       break;
       default:
       printf("Wrong aspect ratio value: %d\n", aspect_ratio);
       aspect_ratio = ASPECT_RATIOS_TYPE_STRECHED;
-      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
+      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, virtual_hw_screen,
         RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);
       break;
     }
 
+    /// Copy pixels and rotate
+    //memcpy(hw_screen->pixels, virtual_hw_screen->pixels, hw_screen->h*hw_screen->w*sizeof(uint16_t));
+    SDL_Copy_Rotate_270(virtual_hw_screen->pixels, hw_screen->pixels,
+                        virtual_hw_screen->w, virtual_hw_screen->h, hw_screen->w, hw_screen->h);
 
-    if ( SDL_MUSTLOCK(hw_screen) ) {
+    /*if ( SDL_MUSTLOCK(hw_screen) ) {
         SDL_UnlockSurface(hw_screen);
-    }
+    }*/
 
     SDL_Flip(hw_screen);
     //SDL_UpdateRect(hw_screen, 0, 0, 0, 0);
