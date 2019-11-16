@@ -27,7 +27,7 @@
 #include "plat.h"
 #include "revision.h"
 
-#define BLACKER_BLACKS
+//#define BLACKER_BLACKS
 
 static const struct in_default_bind in_sdl_defbinds[] = {
   { SDLK_u,	     IN_BINDTYPE_PLAYER12, DKEY_UP },
