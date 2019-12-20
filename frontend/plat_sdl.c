@@ -1514,9 +1514,9 @@ void *plat_gvideo_flip(void)
     }
 
     /// Copy pixels and rotate
-    //memcpy(hw_screen->pixels, virtual_hw_screen->pixels, hw_screen->h*hw_screen->w*sizeof(uint16_t));
-    SDL_Copy_Rotate_270(virtual_hw_screen->pixels, hw_screen->pixels,
-                        virtual_hw_screen->w, virtual_hw_screen->h, hw_screen->w, hw_screen->h);
+    memcpy(hw_screen->pixels, virtual_hw_screen->pixels, hw_screen->h*hw_screen->w*sizeof(uint16_t));
+    /*SDL_Copy_Rotate_270(virtual_hw_screen->pixels, hw_screen->pixels,
+                        virtual_hw_screen->w, virtual_hw_screen->h, hw_screen->w, hw_screen->h);*/
 
     /*if ( SDL_MUSTLOCK(hw_screen) ) {
         SDL_UnlockSurface(hw_screen);
