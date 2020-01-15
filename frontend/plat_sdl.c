@@ -233,8 +233,8 @@ void plat_init(void)
   bgr_to_uyvy_init();
 
   init_menu_SDL();
-  init_menu_zones();
-  init_menu_system_values();
+  //init_menu_zones();
+  //init_menu_system_values();
 }
 
 void plat_finish(void)
