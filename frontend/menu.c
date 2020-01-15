@@ -699,16 +699,16 @@ void menu_screen_refresh(int menuItem, int prevItem, int scroll, uint8_t menu_co
     if(print_arrows){
         /// Top arrow
         SDL_Rect pos_arrow_top;
-        pos_arrow_top.x = (virtual_hw_screen->w - img_arrow_top->w)/2;
-        pos_arrow_top.y = (virtual_hw_screen->h - MENU_BG_SQUREE_HEIGHT)/4 - img_arrow_top->h/2;
-        SDL_BlitSurface(img_arrow_top, NULL, virtual_hw_screen, &pos_arrow_top);
+        pos_arrow_top.x = (draw_screen->w - img_arrow_top->w)/2;
+        pos_arrow_top.y = (draw_screen->h - MENU_BG_SQUREE_HEIGHT)/4 - img_arrow_top->h/2;
+        SDL_BlitSurface(img_arrow_top, NULL, draw_screen, &pos_arrow_top);
 
         /// Bottom arrow
         SDL_Rect pos_arrow_bottom;
-        pos_arrow_bottom.x = (virtual_hw_screen->w - img_arrow_bottom->w)/2;
-        pos_arrow_bottom.y = virtual_hw_screen->h -
-            (virtual_hw_screen->h - MENU_BG_SQUREE_HEIGHT)/4 - img_arrow_bottom->h/2;
-        SDL_BlitSurface(img_arrow_bottom, NULL, virtual_hw_screen, &pos_arrow_bottom);
+        pos_arrow_bottom.x = (draw_screen->w - img_arrow_bottom->w)/2;
+        pos_arrow_bottom.y = draw_screen->h -
+            (draw_screen->h - MENU_BG_SQUREE_HEIGHT)/4 - img_arrow_bottom->h/2;
+        SDL_BlitSurface(img_arrow_bottom, NULL, draw_screen, &pos_arrow_bottom);
     }
 
     /// --------- Screen Rotate --------
