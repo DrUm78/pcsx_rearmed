@@ -938,7 +938,8 @@ void run_menu_loop()
                                 /// ----- Hud Msg -----
                                 if(ret){
                                     MENU_ERROR_PRINTF("Save Failed\n");
-                                    sprintf(shell_cmd, "%s %d \"          SAVE FAILED\"");
+                                    sprintf(shell_cmd, "%s %d \"          SAVE FAILED\"",
+                                        SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP);
                                 }
                                 else{
                                     sprintf(shell_cmd, "%s %d \"        SAVED IN SLOT %d\"",
@@ -970,7 +971,8 @@ void run_menu_loop()
                                 /// ----- Hud Msg -----
                                 if(ret){
                                     MENU_ERROR_PRINTF("Load Failed\n");
-                                    sprintf(shell_cmd, "%s %d \"          LOAD FAILED\"");
+                                    sprintf(shell_cmd, "%s %d \"          LOAD FAILED\"",
+                                        SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP);
                                 }
                                 else{
                                     sprintf(shell_cmd, "%s %d \"      LOADED FROM SLOT %d\"",
