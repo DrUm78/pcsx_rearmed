@@ -981,7 +981,6 @@ void run_menu_loop()
                                     MENU_ERROR_PRINTF("Failed to run command %s\n", shell_cmd);
                                 }
 
-                                //hud_new_msg = 3;
                                 stop_menu_loop = 1;
                             }
                             else{

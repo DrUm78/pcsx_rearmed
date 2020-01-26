@@ -169,20 +169,41 @@ void do_emu_action(void)
 
 	switch (emu_action) {
 	case SACTION_LOAD_STATE:
-		snprintf(hud_msg, sizeof(hud_msg), "LOADING FROM SLOT %d...", state_slot+1);
+		//snprintf(hud_msg, sizeof(hud_msg), "LOADING FROM SLOT %d...", state_slot+1);
+		sprintf(shell_cmd, "%s %d \"    LOADING FROM SLOT %d...\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
 		ret = emu_load_state(state_slot);
-		snprintf(hud_msg, sizeof(hud_msg), "%s FROM SLOT %d", ret == 0 ? "LOADED" : "FAILED TO LOAD", state_slot+1);
-        hud_new_msg = 4;
+		//snprintf(hud_msg, sizeof(hud_msg), "%s FROM SLOT %d", ret == 0 ? "LOADED" : "FAILED TO LOAD", state_slot+1);
+		//hud_new_msg = 4;
+		sprintf(shell_cmd, "%s %d \"%s FROM SLOT %d\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, ret == 0 ? "      LOADED" : "  FAILED TO LOAD", state_slot+1);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		}
 		break;
 	case SACTION_PRE_SAVE_STATE:
-		snprintf(hud_msg, sizeof(hud_msg), "SAVING IN SLOT %d...", state_slot+1);
-        hud_new_msg = 4;
+		/*snprintf(hud_msg, sizeof(hud_msg), "SAVING IN SLOT %d...", state_slot+1);
+		  hud_new_msg = 4;*/
+		sprintf(shell_cmd, "%s %d \"      SAVING IN SLOT %d...\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		}
+
 		emu_action_future = SACTION_SAVE_STATE;
 		break;
 	case SACTION_SAVE_STATE:
 		ret = emu_save_state(state_slot);
-		snprintf(hud_msg, sizeof(hud_msg), "%s IN SLOT %d", ret == 0 ? "SAVED" : "FAILED TO LOAD", state_slot+1);
-        hud_new_msg = 4;
+		/*snprintf(hud_msg, sizeof(hud_msg), "%s IN SLOT %d", ret == 0 ? "SAVED" : "FAILED TO LOAD", state_slot+1);
+		  hud_new_msg = 4;*/
+		sprintf(shell_cmd, "%s %d \"%s IN SLOT %d\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, ret == 0 ? "        SAVED" : "  FAILED TO SAVE", state_slot+1);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		}
 		break;
 #ifndef NO_FRONTEND
 	case SACTION_ENTER_MENU:
@@ -218,12 +239,24 @@ do_state_slot:
 	case SACTION_SWITCH_DISPMODE:
 		aspect_ratio = (aspect_ratio+1)%NB_ASPECT_RATIOS_TYPES;
 		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
-			snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
+			//snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
+			sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%\"",
+				SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
+			fp = popen(shell_cmd, "r");
+			if (fp == NULL) {
+				printf("Failed to run command %s\n", shell_cmd);
+			}
 		}
 		else{
-			snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: %s", aspect_ratio_name[aspect_ratio]);
+			//snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: %s", aspect_ratio_name[aspect_ratio]);
+			sprintf(shell_cmd, "%s %d \"     DISPLAY MODE: %s\"",
+				SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_name[aspect_ratio]);
+			fp = popen(shell_cmd, "r");
+			if (fp == NULL) {
+				printf("Failed to run command %s\n", shell_cmd);
+			}
 		}
-		hud_new_msg = 4;
+		//hud_new_msg = 4;
 		break;
 	case SACTION_ASPECT_RATIO_FACTOR_DECREASE:
 		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
@@ -234,8 +267,14 @@ do_state_slot:
 		else{
 			aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
 		}
-		snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
-		hud_new_msg = 4;
+		/*snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
+		  hud_new_msg = 4;*/
+		sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		}
 		break;
 	case SACTION_ASPECT_RATIO_FACTOR_INCREASE:
 		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
@@ -247,8 +286,14 @@ do_state_slot:
 			aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
 		}
 		aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
-		snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
-		hud_new_msg = 4;
+		/*snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
+		  hud_new_msg = 4;*/
+		sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		}
 		break;
 	case SACTION_FAST_FORWARD:
 		toggle_fast_forward(0);
