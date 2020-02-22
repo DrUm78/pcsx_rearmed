@@ -30,7 +30,7 @@
 #define STATES_DIR "/.pcsx/sstates/"
 #define CHEATS_DIR "/.pcsx/cheats/"
 #define PATCHES_DIR "/.pcsx/patches/"
-#define BIOS_DIR "/bios/"
+#define BIOS_DIR "/mnt/PS1/bios/"
 
 extern char cfgfile_basename[MAXPATHLEN];
 
@@ -85,6 +85,7 @@ enum sched_action {
 	SACTION_GUN_TRIGGER2,
 	SACTION_BRIGHTNESS_DOWN,
 	SACTION_BRIGHTNESS_UP,
+	SACTION_QUICK_SAVE_AND_POWEROFF,
 };
 
 #define SACTION_GUN_MASK (0x0f << SACTION_GUN_TRIGGER)

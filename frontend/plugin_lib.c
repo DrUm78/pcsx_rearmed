@@ -600,6 +600,7 @@ static void update_input(void)
 	if (in_type1 == PSE_PAD_TYPE_ANALOGPAD)
 		update_analogs();
 	emu_act = actions[IN_BINDTYPE_EMU];
+	//printf("emu_act %d 0x%02X\n", emu_act, emu_act);
 	in_state_gun = (emu_act & SACTION_GUN_MASK) >> SACTION_GUN_TRIGGER;
 
 	emu_act &= ~SACTION_GUN_MASK;

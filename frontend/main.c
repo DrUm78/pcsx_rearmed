@@ -55,8 +55,14 @@ char cfgfile_basename[MAXPATHLEN];
 int state_slot;
 enum sched_action emu_action, emu_action_old;
 enum sched_action emu_action_future = SACTION_NONE;
+int mQuickSaveAndPoweroff=0;
 char hud_msg[64];
 int hud_new_msg;
+char *prog_name = NULL;
+char *cdfile = NULL;
+char *cdPath = NULL;
+static char *quick_save_file_extension = "quicksave";
+char *quick_save_file = NULL;
 
 static void make_path(char *buf, size_t size, const char *dir, const char *fname)
 {
@@ -110,7 +116,7 @@ static void set_default_paths(void)
 	snprintf(Config.PatchesDir, sizeof(Config.PatchesDir), "." PATCHES_DIR);
 	MAKE_PATH(Config.Mcd1, MEMCARD_DIR, "card1.mcd");
 	MAKE_PATH(Config.Mcd2, MEMCARD_DIR, "card2.mcd");
-	strcpy(Config.BiosDir, "bios");
+	strcpy(Config.BiosDir, "/mnt/PS1/bios");
 #endif
 
 	strcpy(Config.PluginsDir, "plugins");
@@ -626,15 +632,64 @@ static void check_memcards(void)
 	}
 }
 
+/* Quick save and turn off the console */
+void quick_save_and_poweroff()
+{
+	printf("quick_save_and_poweroff\n");
+    /* Vars */
+    char shell_cmd[1000];
+    FILE *fp;
+
+    /* Save  */
+    if(SaveState(quick_save_file)){
+	printf("Save failed");
+	return;
+    }
+
+    /* Write quick load file */
+    sprintf(shell_cmd, "%s SDL_NOMOUSE=1 \"%s\" -cdfile \"%s\" -loadf \"%s\"",
+	    SHELL_CMD_WRITE_QUICK_LOAD_CMD, prog_name, cdfile, quick_save_file);
+    printf("Cmd write quick load file:\n	%s\n", shell_cmd);
+    fp = popen(shell_cmd, "r");
+    if (fp == NULL) {
+	printf("Failed to run command %s\n", shell_cmd);
+    }
+
+    /* Clean Poweroff */
+    sprintf(shell_cmd, "%s", SHELL_CMD_POWERDOWN);
+    fp = popen(shell_cmd, "r");
+    if (fp == NULL) {
+	printf("Failed to run command %s\n", shell_cmd);
+    }
+
+    /* Exit Emulator */
+    g_emu_want_quit = 1;
+}
+
+/* Handler for SIGUSR1, caused by closing the console */
+void handle_sigusr1(int sig)
+{
+    printf("Caught signal USR1 %d\n", sig);
+
+    /* Exit menu if it was launched */
+    stop_menu_loop = 1;
+
+    /* Signal to quick save and poweoff after next loop */
+    emu_set_action(SACTION_QUICK_SAVE_AND_POWEROFF);
+    mQuickSaveAndPoweroff = 1;
+}
+
 int main(int argc, char *argv[])
 {
 	char file[MAXPATHLEN] = "";
 	char path[MAXPATHLEN];
-	const char *cdfile = NULL;
 	const char *loadst_f = NULL;
 	int psxout = 0;
 	int loadst = 0;
 	int i;
+
+	/* Save program name */
+	prog_name = argv[0];
 
 	emu_core_preinit();
 
@@ -663,6 +718,37 @@ int main(int argc, char *argv[])
 			}
 
 			cdfile = isofilename;
+			printf("cdfile = %s\n", cdfile);
+
+			/* Check if rom file exists, Save ROM name, and ROM path */
+			FILE *f = fopen(cdfile, "rb");
+			if (f) {
+				/* Save Rom path */
+				cdPath = (char *) malloc(strlen(cdfile)*sizeof(char));
+				strcpy(cdPath, cdfile);
+				char *slash = strrchr ((char*)cdPath, '/');
+				*slash = 0;
+				printf("cdPath: %s\n", cdPath);
+
+				/* Rom name without extension */
+				char *point = strrchr ((char*)slash+1, '.');
+				*point = 0;
+				char *cdfile_no_ext = slash+1;
+
+				/* Set quicksave filename */
+				quick_save_file = (char *) malloc( (strlen(cdfile) +
+					strlen(cdfile_no_ext) +
+					strlen(quick_save_file_extension) + 2) * sizeof(char) );
+				sprintf(quick_save_file, "%s/%s.%s",
+					cdPath, cdfile_no_ext, quick_save_file_extension);
+				printf("quick_save_file: %s\n", quick_save_file);
+
+				fclose(f);
+			}
+			else{
+				SysMessage("cdfile not found!");
+				return 1;
+			}
 		}
 		else if (!strcmp(argv[i], "-loadf")) {
 			if (i+1 >= argc) break;
@@ -689,6 +775,7 @@ int main(int argc, char *argv[])
 							"\t-cfg FILE\tLoads desired configuration file (default: ~/.pcsx/pcsx.cfg)\n"
 							"\t-psxout\t\tEnable PSX output\n"
 							"\t-load STATENUM\tLoads savestate STATENUM (1-5)\n"
+							"\t-loadf save_file\tLoads from save file\n"
 							"\t-fps\t\tDisplays FPS\n"
 							"\t-frameskip\tset frameskip on\n"
 							"\t-h -help\tDisplay this message\n"
@@ -719,6 +806,8 @@ int main(int argc, char *argv[])
 	plat_init();
 	menu_init(); // loads config
 
+	check_bioses();
+
 	if (emu_core_init() != 0)
 		return 1;
 
@@ -743,6 +832,10 @@ int main(int argc, char *argv[])
 
 	CheckCdrom();
 	SysReset();
+
+	/* Init Signals */
+	signal(SIGUSR1, handle_sigusr1);
+
 
 	if (file[0] != '\0') {
 		if (Load(file) != -1)
@@ -775,6 +868,21 @@ int main(int argc, char *argv[])
 			SysPrintf("%s state %d\n",
 				ret ? "failed to load" : "loaded", loadst);
 		}
+		/* Load quick save file */
+		else if(access( quick_save_file, F_OK ) != -1){
+			printf("Found quick save file: %s\n", quick_save_file);
+
+			int resume = launch_resume_menu_loop();
+			if(resume == RESUME_YES){
+				printf("Resume game from quick save file: %s\n", quick_save_file);
+				int ret = LoadState(quick_save_file);
+				SysPrintf("%s state file: %s\n",
+					ret ? "failed to load" : "loaded", quick_save_file);
+			}
+			else{
+				printf("Reset game\n");
+			}
+		}
 	}
 	/*else /// We deliberately do not show the menu but exit the game if load failed
 		menu_loop();*/
@@ -786,13 +894,25 @@ int main(int argc, char *argv[])
 		stop = 0;
 		emu_action = SACTION_NONE;
 
+		printf("%s\n", "before execute");
 		psxCpu->Execute();
+		printf("%s\n", "after execute");
+
 		if (emu_action == SACTION_NONE && emu_action_future != SACTION_NONE){
 			emu_set_action(emu_action_future);
 			emu_action_future = SACTION_NONE;
 		}
-		if (emu_action != SACTION_NONE)
+
+		if (emu_action != SACTION_NONE && !mQuickSaveAndPoweroff){
 			do_emu_action();
+		}
+
+		// Quick save and poweroff
+		if(mQuickSaveAndPoweroff){
+			quick_save_and_poweroff();
+			mQuickSaveAndPoweroff = 0;
+		}
+
 	}
 
 	printf("Exit..\n");
@@ -889,8 +1009,13 @@ void SysUpdate() {
 }
 
 int get_state_filename(char *buf, int size, int i) {
-	return get_gameid_filename(buf, size,
-		"." STATES_DIR "%.32s-%.9s.%3.3d", i);
+	/*return get_gameid_filename(buf, size,
+		"." STATES_DIR "%.32s-%.9s.%3.3d", i);*/
+
+	char *romDataFmt = "%.32s-%.9s.%3.3d";
+	char *save_path_formated = (char*)malloc(strlen(romDataFmt)+strlen(cdPath)+2);
+	sprintf(save_path_formated, "%s/%s", cdPath, romDataFmt);
+	return get_gameid_filename(buf, size, save_path_formated , i);
 }
 
 int emu_check_state(int slot)

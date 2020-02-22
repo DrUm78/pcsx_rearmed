@@ -1,6 +1,7 @@
 void menu_init(void);
 void menu_prepare_emu(void);
 void menu_loop(void);
+void check_bioses(void);
 void menu_finish(void);
 
 void init_menu_SDL();
@@ -8,6 +9,7 @@ void deinit_menu_SDL();
 void init_menu_zones();
 void run_menu_loop();
 void init_menu_system_values();
+int launch_resume_menu_loop();
 
 void menu_notify_mode_change(int w, int h, int bpp);
 
@@ -59,6 +61,17 @@ typedef enum{
 #define X(a, b) a,
 typedef enum {ASPECT_RATIOS} ENUM_ASPECT_RATIOS_TYPES;
 
+///------ Definition of the different resume options
+#define RESUME_OPTIONS \
+    X(RESUME_YES, "RESUME GAME") \
+    X(RESUME_NO, "NEW GAME") \
+    X(NB_RESUME_OPTIONS, "")
+
+////------ Enumeration of the different resume options ------
+#undef X
+#define X(a, b) a,
+typedef enum {RESUME_OPTIONS} ENUM_RESUME_OPTIONS;
+
 ////------ Defines to be shared -------
 #define STEP_CHANGE_VOLUME          10
 #define STEP_CHANGE_BRIGHTNESS      10
@@ -71,6 +84,7 @@ typedef enum {ASPECT_RATIOS} ENUM_ASPECT_RATIOS_TYPES;
 #define SHELL_CMD_BRIGHTNESS_SET    "brightness_set"
 #define SHELL_CMD_POWERDOWN         "shutdown_funkey"
 #define SHELL_CMD_NOTIF				"notif_set"
+#define SHELL_CMD_WRITE_QUICK_LOAD_CMD	"write_args_quick_load_file"
 
 ////------ Global variables -------
 extern int g_opts, g_scaler, g_gamma;
@@ -88,3 +102,5 @@ extern const char *aspect_ratio_name[];
 extern int aspect_ratio;
 extern int aspect_ratio_factor_percent;
 extern int aspect_ratio_factor_step;
+extern int stop_menu_loop;
+extern char *quick_save_file;
