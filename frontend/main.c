@@ -876,6 +876,7 @@ int main(int argc, char *argv[])
 			if(resume == RESUME_YES){
 				printf("Resume game from quick save file: %s\n", quick_save_file);
 				int ret = LoadState(quick_save_file);
+				ready_to_go |= ret == 0;
 				SysPrintf("%s state file: %s\n",
 					ret ? "failed to load" : "loaded", quick_save_file);
 			}
@@ -884,8 +885,19 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
-	/*else /// We deliberately do not show the menu but exit the game if load failed
-		menu_loop();*/
+	/*else{
+		/// We deliberately do not show the menu but exit the game if load failed
+		menu_loop();
+	}*/
+
+	/* Remove quicksave file if present */
+	if (remove(quick_save_file) == 0){
+		printf("Deleted successfully: %s\n", quick_save_file);
+	}
+	else{
+		printf("Unable to delete the file: %s\n", quick_save_file);
+	}
+
 
 	pl_start_watchdog();
 
@@ -894,9 +906,7 @@ int main(int argc, char *argv[])
 		stop = 0;
 		emu_action = SACTION_NONE;
 
-		printf("%s\n", "before execute");
 		psxCpu->Execute();
-		printf("%s\n", "after execute");
 
 		if (emu_action == SACTION_NONE && emu_action_future != SACTION_NONE){
 			emu_set_action(emu_action_future);

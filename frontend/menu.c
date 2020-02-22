@@ -1272,7 +1272,7 @@ int launch_resume_menu_loop()
         MENU_ERROR_PRINTF("ERROR with SDL_EnableKeyRepeat: %s\n", SDL_GetError());
     }
 
-    return option_idx==RESUME_YES ? 1 : 0;
+    return option_idx;
 }
 
 
