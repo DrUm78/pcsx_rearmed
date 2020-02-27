@@ -746,6 +746,7 @@ void run_menu_loop()
     uint8_t menu_confirmation = 0;
     stop_menu_loop = 0;
     char fname[MAXPATHLEN];
+    int reset_last_scren_on_exit = 1;
 
     /// ------ Get init values -------
     init_menu_system_values();
@@ -1001,6 +1002,12 @@ void run_menu_loop()
                             MENU_DEBUG_PRINTF("Exit game\n");
                             if(menu_confirmation){
                                 MENU_DEBUG_PRINTF("Exit game - confirmed\n");
+
+                                /// ----- Long save ahead, let' clear the screen for a better effect -----
+                                memset(hw_screen->pixels, 0, hw_screen->w*hw_screen->w*hw_screen->format->BytesPerPixel);
+                                reset_last_scren_on_exit = 0;
+                                SDL_Flip(hw_screen);
+
                                 /// ----- The game should be saved here ----
                                 if(SaveState(quick_save_file)){
                                     MENU_ERROR_PRINTF("Quick save failed");
@@ -1085,8 +1092,10 @@ void run_menu_loop()
     }
 
     /// ------ Reset last screen ------
-    SDL_BlitSurface(backup_hw_screen, NULL, hw_screen, NULL);
-    SDL_Flip(hw_screen);
+    if(reset_last_scren_on_exit){
+        SDL_BlitSurface(backup_hw_screen, NULL, hw_screen, NULL);
+        SDL_Flip(hw_screen);
+    }
 }
 
 

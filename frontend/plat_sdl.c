@@ -502,6 +502,125 @@ void flip_NNOptimized_MissingPixelsBilinear(SDL_Surface *virtual_screen, SDL_Sur
 }
 
 
+
+/// Interpolation with left, right pixels, pseudo gaussian weighting for downscaling
+void flip_Downscale_LeftRightGaussianFilter(SDL_Surface *src_surface, SDL_Surface *dst_surface, int new_w, int new_h){
+  int w1=src_surface->w;
+  int h1=src_surface->h;
+  int w2=dst_surface->w;
+  int h2=dst_surface->h;
+  int x_ratio = (int)((w1<<16)/w2);
+  int y_ratio = (int)((h1<<16)/h2);
+  int y_padding = (RES_HW_SCREEN_VERTICAL-h2)/2;
+  int x1, y1;
+  uint16_t *src_screen = (uint16_t *)src_surface->pixels;
+  uint16_t *dst_screen = (uint16_t *)dst_surface->pixels;
+
+  /// --- Compute padding for centering when out of bounds ---
+  int x_padding = 0;
+  if(w2>RES_HW_SCREEN_HORIZONTAL){
+    x_padding = (w2-RES_HW_SCREEN_HORIZONTAL)/2 + 1;
+  }
+  int x_padding_ratio = x_padding*w1/w2;
+
+  /// --- Interp params ---
+  int px_diff_prev_x = 0;
+  int px_diff_next_x = 0;
+  uint32_t ponderation_factor;
+  uint8_t left_px_missing, right_px_missing;
+
+  uint16_t * cur_p;
+  uint16_t * cur_p_left;
+  uint16_t * cur_p_right;
+  uint32_t red_comp, green_comp, blue_comp;
+
+
+  for (int i=0;i<h2;i++)
+  {
+    if(i>=RES_HW_SCREEN_VERTICAL){
+      continue;
+    }
+    uint16_t* t = (uint16_t*)(dst_screen +
+      (i+y_padding)*((w2>RES_HW_SCREEN_HORIZONTAL)?RES_HW_SCREEN_HORIZONTAL:w2) );
+    // ------ current and next y value ------
+    y1 = ((i*y_ratio)>>16);
+    uint16_t* p = (uint16_t*)(src_screen + (y1*w1+x_padding_ratio) );
+    int rat = 0;
+    for (int j=0;j<w2;j++)
+    {
+      if(j>=RES_HW_SCREEN_HORIZONTAL){
+        continue;
+      }
+
+      // ------ current x value ------
+      x1 = (rat>>16);
+      px_diff_next_x = ((rat+x_ratio)>>16) - x1;
+
+      // ------ adapted bilinear with 3x3 gaussian blur -------
+      cur_p = p+x1;
+      if(px_diff_prev_x > 1 || px_diff_next_x > 1 ){
+        red_comp=((*cur_p)&0xF800) << 1;
+        green_comp=((*cur_p)&0x07E0) << 1;
+        blue_comp=((*cur_p)&0x001F) << 1;
+
+        left_px_missing = (px_diff_prev_x > 1 && x1>0);
+        right_px_missing = (px_diff_next_x > 1 && x1+1<w1);
+        ponderation_factor = 2 + left_px_missing + right_px_missing;
+
+        // ---- Interpolate current and left ----
+        if(left_px_missing){
+            cur_p_left = p+x1-1;
+            red_comp += ((*cur_p_left)&0xF800);
+            green_comp += ((*cur_p_left)&0x07E0);
+            blue_comp += ((*cur_p_left)&0x001F);
+        }
+
+        // ---- Interpolate current and right ----
+        if(right_px_missing){
+          cur_p_right = p+x1+1;
+            red_comp += ((*cur_p_right)&0xF800);
+            green_comp += ((*cur_p_right)&0x07E0);
+            blue_comp += ((*cur_p_right)&0x001F);
+        }
+
+        /// --- Compute new px value ---
+        if(ponderation_factor==4){
+            red_comp = (red_comp >> 2)&0xF800;
+            green_comp = (green_comp >> 2)&0x07C0;
+            blue_comp = (blue_comp >> 2)&0x001F;
+        }
+        else if(ponderation_factor==2){
+            red_comp = (red_comp >> 1)&0xF800;
+            green_comp = (green_comp >> 1)&0x07C0;
+            blue_comp = (blue_comp >> 1)&0x001F;
+        }
+        else{
+            red_comp = (red_comp / ponderation_factor )&0xF800;
+            green_comp = (green_comp / ponderation_factor )&0x07C0;
+            blue_comp = (blue_comp / ponderation_factor )&0x001F;
+        }
+
+        /// --- write pixel ---
+        *t++ = red_comp+green_comp+blue_comp;
+      }
+      else{
+        /// --- copy pixel ---
+        *t++ = (*cur_p);
+
+        /// Debug
+        //occurence_pond[1] += 1;
+      }
+
+      /// save number of pixels to interpolate
+      px_diff_prev_x = px_diff_next_x;
+
+      // ------ next pixel ------
+      rat += x_ratio;
+    }
+  }
+}
+
+
 /// Nearest neighbor with 2D bilinear and interpolation with left and right pixels, pseudo gaussian weighting
 void flip_NNOptimized_LeftAndRightBilinear(SDL_Surface *virtual_screen, SDL_Surface *hardware_screen, int new_w, int new_h){
   int w1=virtual_screen->w;
@@ -1426,6 +1545,109 @@ void flip_NNOptimized_FullBilinear_GaussianWeighted(SDL_Surface *virtual_screen,
 }
 
 
+/// Downscaling with full 2D Gaussian weight on horizontal and NN on vertical
+void flip_NNOptimized_LeftRightBilinear_GaussianWeighted(SDL_Surface *virtual_screen, SDL_Surface *hardware_screen, int new_w, int new_h){
+  int w1=virtual_screen->w;
+  int h1=virtual_screen->h;
+  int w2=new_w;
+  int h2=new_h;
+  //printf("virtual_screen->w=%d, virtual_screen->w=%d\n", virtual_screen->w, virtual_screen->h);
+  int y_padding = (RES_HW_SCREEN_VERTICAL-new_h)/2;
+  int x_ratio = (int)((w1<<16)/w2);
+  int y_ratio = (int)((h1<<16)/h2);
+  int x1, y1;
+  //int cnt_interp = 0; int cnt_no_interp = 0;
+
+  /// ---- Compute padding for centering when out of bounds ----
+  int x_padding = 0;
+  if(w2>RES_HW_SCREEN_HORIZONTAL){
+    x_padding = (w2-RES_HW_SCREEN_HORIZONTAL)/2 + 1;
+  }
+  int x_padding_ratio = x_padding*w1/w2;
+
+  /// ---- Interpolation params ----
+  uint32_t max_pix_interpolate = 3;
+  if(max_pix_interpolate > 3 || max_pix_interpolate<1){
+    printf("ERROR cannot interpolate more than 3x3 px in flip_NNOptimized_FullBilinear_GaussianWeighted\n");
+    return;
+  }
+
+  /// ---- Convolutional mask ----
+  int mask_weight_5x5[] = {6, 4, 1};
+  int mask_weight_3x3[] = {2, 1};
+  int mask_weight_1x1[] = {1};
+  int *mask_weight;
+  if(max_pix_interpolate==3){
+    mask_weight = mask_weight_5x5;
+  }
+  else if(max_pix_interpolate==2){
+    mask_weight = mask_weight_3x3;
+  }
+  else{
+    mask_weight = mask_weight_1x1;
+  }
+
+  /// ---- Copy and interpolate pixels ----
+  for (int i=0;i<h2;i++)
+  {
+    if(i>=RES_HW_SCREEN_VERTICAL){
+      continue;
+    }
+
+    uint16_t* t = (uint16_t*)(hardware_screen->pixels+( (i+y_padding)*((w2>RES_HW_SCREEN_HORIZONTAL)?RES_HW_SCREEN_HORIZONTAL:w2))*sizeof(uint16_t));
+
+    // ------ current and next y value ------
+    y1 = ((i*y_ratio)>>16);
+
+    uint16_t* p = (uint16_t*)(virtual_screen->pixels + (y1*w1 + x_padding_ratio) *sizeof(uint16_t));
+    int rat = 0;
+    for (int j=0;j<w2;j++)
+    {
+      if(j>=RES_HW_SCREEN_HORIZONTAL){
+        continue;
+      }
+
+      // ------ current and next x value ------
+      x1 = (rat>>16);
+      int px_diff_next_x = MIN( MAX( ((rat+x_ratio)>>16) - x1, 1), max_pix_interpolate); //we interpolate max "max_pix_interpolate" pix in each dim
+
+      // ------ bilinear uniformly weighted --------
+      uint32_t red_comp=0, green_comp=0, blue_comp=0;
+      int ponderation_factor=0;
+      uint16_t * cur_p;
+
+      //printf("\npx_diff_prev_y=%d, px_diff_prev_x=%d, px_diff_next_y=%d, px_diff_next_x=%d, interp_px=", px_diff_prev_y, px_diff_prev_x, px_diff_next_y, px_diff_next_x);
+
+
+
+        for(int cur_px_diff_x=0; cur_px_diff_x<px_diff_next_x; cur_px_diff_x++){
+          if(x1 + cur_px_diff_x >= w1 || x1 < -cur_px_diff_x){
+            continue;
+          }
+          cur_p = (p+x1+cur_px_diff_x);
+          int weight = mask_weight[ABS(cur_px_diff_x)];
+
+          red_comp += ((*cur_p)&0xF800) * weight;
+          green_comp += ((*cur_p)&0x07E0) * weight;
+          blue_comp += ((*cur_p)&0x001F) * weight;
+          ponderation_factor += weight;
+        }
+      //printf("\n");
+
+      /// ------ Ponderation -------
+      red_comp = (red_comp / ponderation_factor) & 0xF800;
+      green_comp = (green_comp / ponderation_factor )&0x07E0;
+      blue_comp = (blue_comp / ponderation_factor) & 0x001F;
+      *t++ = red_comp+green_comp+blue_comp;
+
+      // ------ next pixel ------
+      rat += x_ratio;
+    }
+  }
+  //printf("cnt_interp = %d, int cnt_no_interp = %d\n", cnt_interp, cnt_no_interp);
+}
+
+
 void SDL_Copy_Rotate_270(uint16_t *source_pixels, uint16_t *dest_pixels,
                 int src_w, int src_h, int dst_w, int dst_h){
   int i, j;
@@ -1462,6 +1684,10 @@ void *plat_gvideo_flip(void)
   }
   else {
 
+    if ( SDL_MUSTLOCK(hw_screen) ) {
+        SDL_UnlockSurface(hw_screen);
+    }
+
     //printf("w:%d,h:%d\n", plat_sdl_screen->w, plat_sdl_screen->h);
 
     /* Lock the screen for direct access to the pixels */
@@ -1475,57 +1701,62 @@ void *plat_gvideo_flip(void)
     /// --------------Optimized Flip depending on aspect ratio -------------
     static int prev_aspect_ratio;
     if(prev_aspect_ratio != aspect_ratio || need_screen_cleared){
-      clear_hw_screen(virtual_hw_screen, 0);
+      clear_hw_screen(hw_screen, 0);
       prev_aspect_ratio = aspect_ratio;
       need_screen_cleared = 0;
     }
 
     switch(aspect_ratio){
       case ASPECT_RATIOS_TYPE_STRECHED:
-      /*flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, virtual_hw_screen,
+      /*flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, hw_screen,
         RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);*/
-      flip_NNOptimized_LeftAndRightBilinear(plat_sdl_screen, virtual_hw_screen,
+      /*flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
+        RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);*/
+      /*flip_NNOptimized_LeftAndRightBilinear(plat_sdl_screen, hw_screen,
+        RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);*/
+      flip_Downscale_LeftRightGaussianFilter(plat_sdl_screen, hw_screen,
         RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);
+      /*flip_NNOptimized_LeftRightBilinear_GaussianWeighted(plat_sdl_screen, hw_screen,
+        RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);*/
       break;
       case ASPECT_RATIOS_TYPE_MANUAL:
       ;uint32_t h_scaled = MIN(plat_sdl_screen->h*RES_HW_SCREEN_HORIZONTAL/plat_sdl_screen->w,
                               RES_HW_SCREEN_VERTICAL);
       uint32_t h_zoomed = MIN(h_scaled + aspect_ratio_factor_percent*(RES_HW_SCREEN_VERTICAL - h_scaled)/100,
                               RES_HW_SCREEN_VERTICAL);
-      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, virtual_hw_screen,
+      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
           MAX(plat_sdl_screen->w*h_zoomed/plat_sdl_screen->h, RES_HW_SCREEN_HORIZONTAL),
           MIN(h_zoomed, RES_HW_SCREEN_VERTICAL));
       break;
       case ASPECT_RATIOS_TYPE_CROPPED:
-      flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, virtual_hw_screen,
+      flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, hw_screen,
         MAX(plat_sdl_screen->w*RES_HW_SCREEN_VERTICAL/plat_sdl_screen->h, RES_HW_SCREEN_HORIZONTAL),
         RES_HW_SCREEN_VERTICAL);
       break;
       case ASPECT_RATIOS_TYPE_SCALED:
-      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, virtual_hw_screen,
+      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
         RES_HW_SCREEN_HORIZONTAL,
         MIN(plat_sdl_screen->h*RES_HW_SCREEN_HORIZONTAL/plat_sdl_screen->w, RES_HW_SCREEN_VERTICAL));
       break;
       default:
       printf("Wrong aspect ratio value: %d\n", aspect_ratio);
       aspect_ratio = ASPECT_RATIOS_TYPE_STRECHED;
-      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, virtual_hw_screen,
+      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
         RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);
       break;
     }
 
     /// Copy pixels and rotate
-    memcpy(hw_screen->pixels, virtual_hw_screen->pixels, hw_screen->h*hw_screen->w*sizeof(uint16_t));
+    /*memcpy(hw_screen->pixels, virtual_hw_screen->pixels, hw_screen->h*hw_screen->w*sizeof(uint16_t));*/
     /*SDL_Copy_Rotate_270(virtual_hw_screen->pixels, hw_screen->pixels,
                         virtual_hw_screen->w, virtual_hw_screen->h, hw_screen->w, hw_screen->h);*/
 
-    /*if ( SDL_MUSTLOCK(hw_screen) ) {
-        SDL_UnlockSurface(hw_screen);
-    }*/
-
+    /// Flip Display
     SDL_Flip(hw_screen);
-    //SDL_UpdateRect(hw_screen, 0, 0, 0, 0);
-    //SDL_Flip(plat_sdl_screen);
+
+    if ( SDL_MUSTLOCK(hw_screen) ) {
+        SDL_LockSurface(hw_screen);
+    }
 
     return plat_sdl_screen->pixels;
   }

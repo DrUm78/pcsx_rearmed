@@ -64,6 +64,71 @@ char *cdPath = NULL;
 static char *quick_save_file_extension = "quicksave";
 char *quick_save_file = NULL;
 
+
+
+/* Send command to kill any previously scheduled shutdown */
+void kill_scheduled_shutdown()
+{
+	printf("kill_scheduled_shutdown\n");
+    /* Vars */
+    char shell_cmd_tmp[100];
+    FILE *fp;
+
+    /* Send command to kill any previously scheduled shutdown */
+    sprintf(shell_cmd_tmp, "pkill %s", SHELL_CMD_SCHEDULE_POWERDOWN);
+    fp = popen(shell_cmd_tmp, "r");
+    if (fp == NULL) {
+	printf("Failed to run command %s\n", shell_cmd_tmp);
+    }
+}
+
+/* Quick save and turn off the console */
+void quick_save_and_poweroff()
+{
+    printf("quick_save_and_poweroff\n");
+    /* Vars */
+    char shell_cmd[1000];
+    FILE *fp;
+
+    /* Save  */
+    if(SaveState(quick_save_file)){
+	printf("Save failed");
+	return;
+    }
+
+    /* Write quick load file */
+    sprintf(shell_cmd, "%s SDL_NOMOUSE=1 \"%s\" -cdfile \"%s\" -loadf \"%s\"",
+	    SHELL_CMD_WRITE_QUICK_LOAD_CMD, prog_name, cdfile, quick_save_file);
+    printf("Cmd write quick load file:\n	%s\n", shell_cmd);
+    fp = popen(shell_cmd, "r");
+    if (fp == NULL) {
+	printf("Failed to run command %s\n", shell_cmd);
+    }
+
+    /* Clean Poweroff */
+    sprintf(shell_cmd, "%s", SHELL_CMD_POWERDOWN);
+    fp = popen(shell_cmd, "r");
+    if (fp == NULL) {
+	printf("Failed to run command %s\n", shell_cmd);
+    }
+
+    /* Exit Emulator */
+    g_emu_want_quit = 1;
+}
+
+/* Handler for SIGUSR1, caused by closing the console */
+void handle_sigusr1(int sig)
+{
+    //printf("Caught signal USR1 %d\n", sig);
+
+    /* Exit menu if it was launched */
+    stop_menu_loop = 1;
+
+    /* Signal to quick save and poweoff after next loop */
+    emu_set_action(SACTION_QUICK_SAVE_AND_POWEROFF);
+    mQuickSaveAndPoweroff = 1;
+}
+
 static void make_path(char *buf, size_t size, const char *dir, const char *fname)
 {
 	if (fname)
@@ -174,6 +239,10 @@ void do_emu_action(void)
 	emu_action_old = emu_action;
 
 	switch (emu_action) {
+	case SACTION_QUICK_SAVE_AND_POWEROFF:
+		quick_save_and_poweroff();
+		mQuickSaveAndPoweroff = 0;
+		break;
 	case SACTION_LOAD_STATE:
 		//snprintf(hud_msg, sizeof(hud_msg), "LOADING FROM SLOT %d...", state_slot+1);
 		sprintf(shell_cmd, "%s %d \"    LOADING FROM SLOT %d...\"",
@@ -632,53 +701,6 @@ static void check_memcards(void)
 	}
 }
 
-/* Quick save and turn off the console */
-void quick_save_and_poweroff()
-{
-	printf("quick_save_and_poweroff\n");
-    /* Vars */
-    char shell_cmd[1000];
-    FILE *fp;
-
-    /* Save  */
-    if(SaveState(quick_save_file)){
-	printf("Save failed");
-	return;
-    }
-
-    /* Write quick load file */
-    sprintf(shell_cmd, "%s SDL_NOMOUSE=1 \"%s\" -cdfile \"%s\" -loadf \"%s\"",
-	    SHELL_CMD_WRITE_QUICK_LOAD_CMD, prog_name, cdfile, quick_save_file);
-    printf("Cmd write quick load file:\n	%s\n", shell_cmd);
-    fp = popen(shell_cmd, "r");
-    if (fp == NULL) {
-	printf("Failed to run command %s\n", shell_cmd);
-    }
-
-    /* Clean Poweroff */
-    sprintf(shell_cmd, "%s", SHELL_CMD_POWERDOWN);
-    fp = popen(shell_cmd, "r");
-    if (fp == NULL) {
-	printf("Failed to run command %s\n", shell_cmd);
-    }
-
-    /* Exit Emulator */
-    g_emu_want_quit = 1;
-}
-
-/* Handler for SIGUSR1, caused by closing the console */
-void handle_sigusr1(int sig)
-{
-    printf("Caught signal USR1 %d\n", sig);
-
-    /* Exit menu if it was launched */
-    stop_menu_loop = 1;
-
-    /* Signal to quick save and poweoff after next loop */
-    emu_set_action(SACTION_QUICK_SAVE_AND_POWEROFF);
-    mQuickSaveAndPoweroff = 1;
-}
-
 int main(int argc, char *argv[])
 {
 	char file[MAXPATHLEN] = "";
@@ -717,7 +739,8 @@ int main(int argc, char *argv[])
 					isofilename[0] = 0;
 			}
 
-			cdfile = isofilename;
+			cdfile = (char*) malloc(strlen(isofilename)*sizeof(char));
+			strcpy(cdfile, isofilename);
 			printf("cdfile = %s\n", cdfile);
 
 			/* Check if rom file exists, Save ROM name, and ROM path */
@@ -856,20 +879,20 @@ int main(int argc, char *argv[])
 		int ret = LoadState(loadst_f);
 		SysPrintf("%s state file: %s\n",
 			ret ? "failed to load" : "loaded", loadst_f);
-		ready_to_go |= ret == 0;
+		ready_to_go |= (ret == 0);
 	}
 
 	if (ready_to_go) {
 		menu_prepare_emu();
 
 		// If a state has been specified, then load that
-		if (loadst) {
+		if (!loadst_f && loadst) {
 			int ret = emu_load_state(loadst - 1);
 			SysPrintf("%s state %d\n",
 				ret ? "failed to load" : "loaded", loadst);
 		}
 		/* Load quick save file */
-		else if(access( quick_save_file, F_OK ) != -1){
+		else if(!loadst_f && access( quick_save_file, F_OK ) != -1){
 			printf("Found quick save file: %s\n", quick_save_file);
 
 			int resume = launch_resume_menu_loop();
@@ -908,21 +931,22 @@ int main(int argc, char *argv[])
 
 		psxCpu->Execute();
 
+		// Force Quick save and poweroff
+		if(mQuickSaveAndPoweroff){
+			kill_scheduled_shutdown();
+			//emu_action = SACTION_NONE;
+			emu_action_future = SACTION_QUICK_SAVE_AND_POWEROFF;
+			//mQuickSaveAndPoweroff = 0;
+		}
+
 		if (emu_action == SACTION_NONE && emu_action_future != SACTION_NONE){
 			emu_set_action(emu_action_future);
 			emu_action_future = SACTION_NONE;
 		}
 
-		if (emu_action != SACTION_NONE && !mQuickSaveAndPoweroff){
+		if (emu_action != SACTION_NONE){
 			do_emu_action();
 		}
-
-		// Quick save and poweroff
-		if(mQuickSaveAndPoweroff){
-			quick_save_and_poweroff();
-			mQuickSaveAndPoweroff = 0;
-		}
-
 	}
 
 	printf("Exit..\n");
