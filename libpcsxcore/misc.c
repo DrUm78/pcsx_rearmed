@@ -568,7 +568,6 @@ int SaveState(const char *file) {
 	GPUFreeze_t *gpufP;
 	SPUFreeze_t *spufP;
 	int Size;
-	unsigned char *pMem;
 
 	f = SaveFuncs.open(file, "wb");
 	if (f == NULL) return -1;
@@ -579,11 +578,13 @@ int SaveState(const char *file) {
 	SaveFuncs.write(f, (void *)&SaveVersion, sizeof(u32));
 	SaveFuncs.write(f, (void *)&Config.HLE, sizeof(boolean));
 
+	/* Not done here or in loading to speed up the process*/
+	/*unsigned char *pMem;
 	pMem = (unsigned char *)malloc(128 * 96 * 3);
 	if (pMem == NULL) return -1;
-	GPU_getScreenPic(pMem);
+	//GPU_getScreenPic(pMem); //To go faster
 	SaveFuncs.write(f, pMem, 128 * 96 * 3);
-	free(pMem);
+	free(pMem);*/
 
 	if (Config.HLE)
 		psxBiosFreeze(1);
@@ -650,7 +651,9 @@ int LoadState(const char *file) {
 		psxBiosInit();
 
 	psxCpu->Reset();
-	SaveFuncs.seek(f, 128 * 96 * 3, SEEK_CUR);
+
+	/* Not done here or in saving to speed up the process*/
+	//SaveFuncs.seek(f, 128 * 96 * 3, SEEK_CUR);
 
 	SaveFuncs.read(f, psxM, 0x00200000);
 	SaveFuncs.read(f, psxR, 0x00080000);
