@@ -757,7 +757,7 @@ void run_menu_loop()
         MENU_ERROR_PRINTF("ERROR Could not copy hw_screen: %s\n", SDL_GetError());
     }*/
     //uint16_t *dst_virtual = virtual_hw_screen();
-    memcpy(backup_hw_screen->pixels, (uint16_t *)virtual_hw_screen->pixels,
+    memcpy(backup_hw_screen->pixels, (uint16_t *)hw_screen->pixels,
             RES_HW_SCREEN_HORIZONTAL * RES_HW_SCREEN_VERTICAL * sizeof(u16));
 
     /// -------- Main loop ---------
