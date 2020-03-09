@@ -821,6 +821,9 @@ int main(int argc, char *argv[])
 	if (cdfile)
 		set_cd_image(cdfile);
 
+    /* Set env var for no mouse */
+    putenv(strdup("SDL_NOMOUSE=1"));
+
 	// frontend stuff
 	// init input but leave probing to platform code,
 	// they add input drivers and may need to modify them after probe
