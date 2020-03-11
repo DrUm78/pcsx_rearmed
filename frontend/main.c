@@ -908,6 +908,14 @@ int main(int argc, char *argv[])
 			}
 			else{
 				printf("Reset game\n");
+
+				/* Remove quicksave file if present */
+				if (remove(quick_save_file) == 0){
+					printf("Deleted successfully: %s\n", quick_save_file);
+				}
+				else{
+					printf("Unable to delete the file: %s\n", quick_save_file);
+				}
 			}
 		}
 	}
@@ -915,14 +923,6 @@ int main(int argc, char *argv[])
 		/// We deliberately do not show the menu but exit the game if load failed
 		menu_loop();
 	}*/
-
-	/* Remove quicksave file if present */
-	if (remove(quick_save_file) == 0){
-		printf("Deleted successfully: %s\n", quick_save_file);
-	}
-	else{
-		printf("Unable to delete the file: %s\n", quick_save_file);
-	}
 
 
 	pl_start_watchdog();
