@@ -90,6 +90,9 @@ void quick_save_and_poweroff()
     char shell_cmd[1000];
     FILE *fp;
 
+    /* Send command to kill any previously scheduled shutdown */
+	kill_scheduled_shutdown();
+
     /* Save  */
     if(SaveState(quick_save_file)){
 	printf("Save failed");
@@ -106,6 +109,7 @@ void quick_save_and_poweroff()
     }
 
     /* Clean Poweroff */
+    printf("Poweroff now with cmd: %s\n", SHELL_CMD_POWERDOWN);
     sprintf(shell_cmd, "%s", SHELL_CMD_POWERDOWN);
     fp = popen(shell_cmd, "r");
     if (fp == NULL) {
@@ -285,6 +289,7 @@ void do_emu_action(void)
 		toggle_fast_forward(1);
 		//menu_loop();
 		run_menu_loop();
+		printf("exiting menu\n");
 		return;
 	case SACTION_NEXT_SSLOT:
 		state_slot++;
@@ -934,14 +939,6 @@ int main(int argc, char *argv[])
 
 		psxCpu->Execute();
 
-		// Force Quick save and poweroff
-		if(mQuickSaveAndPoweroff){
-			kill_scheduled_shutdown();
-			//emu_action = SACTION_NONE;
-			emu_action_future = SACTION_QUICK_SAVE_AND_POWEROFF;
-			//mQuickSaveAndPoweroff = 0;
-		}
-
 		if (emu_action == SACTION_NONE && emu_action_future != SACTION_NONE){
 			emu_set_action(emu_action_future);
 			emu_action_future = SACTION_NONE;
@@ -949,6 +946,15 @@ int main(int argc, char *argv[])
 
 		if (emu_action != SACTION_NONE){
 			do_emu_action();
+		}
+
+		// Force Quick save and poweroff
+		if(mQuickSaveAndPoweroff){
+			quick_save_and_poweroff();
+
+			/*kill_scheduled_shutdown();
+			emu_action_future = SACTION_QUICK_SAVE_AND_POWEROFF;*/
+			//mQuickSaveAndPoweroff = 0;
 		}
 	}
 
