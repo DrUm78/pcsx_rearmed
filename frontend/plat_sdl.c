@@ -1902,6 +1902,82 @@ void flip_Downscale_LeftRightGaussianFilter_OptimizedWidth320(SDL_Surface *src_s
 
 
 
+/// Interpolation with left, right pixels, pseudo gaussian weighting for downscaling - operations on 16bits
+void flip_Downscale_OptimizedWidth320_mergeUpDown(SDL_Surface *src_surface, SDL_Surface *dst_surface, int new_w, int new_h){
+  int w1=src_surface->w;
+  int h1=src_surface->h;
+  int w2=dst_surface->w;
+  int h2=dst_surface->h;
+
+  if(w1!=320){
+    printf("src_surface->w (%d) != 320\n", src_surface->w);
+    return;
+  }
+
+  //printf("src = %dx%d\n", w1, h1);
+  int y_ratio = (int)((h1<<16)/h2);
+  int y_padding = (RES_HW_SCREEN_VERTICAL-h2)/2;
+  int y1=0, prev_y1=-1, prev_prev_y1=-2;
+  uint16_t *src_screen = (uint16_t *)src_surface->pixels;
+  uint16_t *dst_screen = (uint16_t *)dst_surface->pixels;
+
+  uint16_t *prev_t, *t_init=dst_screen;
+
+  /* Interpolation */
+  for (int i=0;i<h2;i++)
+  {
+    if(i>=RES_HW_SCREEN_VERTICAL){
+      continue;
+    }
+
+    prev_t = t_init;
+    t_init = (uint16_t*)(dst_screen +
+      (i+y_padding)*((w2>RES_HW_SCREEN_HORIZONTAL)?RES_HW_SCREEN_HORIZONTAL:w2) );
+    uint16_t *t = t_init;
+
+    // ------ current and next y value ------
+    prev_prev_y1 = prev_y1;
+    prev_y1 = y1;
+    y1 = ((i*y_ratio)>>16);
+
+    uint16_t* p = (uint16_t*)(src_screen + (y1*w1) );
+
+    for (int j=0;j<80;j++)
+    {
+      /* Horizontaly:
+       * Before(4):
+       * (a)(b)(c)(d)
+       * After(3):
+       * (aaab)(bc)(cddd)
+       */
+      uint16_t _a = *(p    );
+      uint16_t _b = *(p + 1);
+      uint16_t _c = *(p + 2);
+      uint16_t _d = *(p + 3);
+      *(t    ) = Weight3_1( _a, _b );
+      *(t + 1) = Weight1_1( _b, _c );
+      *(t + 2) = Weight1_3( _c, _d );
+
+      if(prev_y1 == prev_prev_y1 && y1 != prev_y1){
+        //printf("we are here %d\n", ++count);
+        *(prev_t    ) = Weight1_1(*(t    ), *(prev_t    ));
+        *(prev_t + 1) = Weight1_1(*(t + 1), *(prev_t + 1));
+        *(prev_t + 2) = Weight1_1(*(t + 2), *(prev_t + 2));
+      }
+
+
+      // ------ next dst pixel ------
+      t+=3;
+      prev_t+=3;
+      p+=4;
+    }
+  }
+}
+
+
+
+
+
 void SDL_Copy_Rotate_270(uint16_t *source_pixels, uint16_t *dest_pixels,
                 int src_w, int src_h, int dst_w, int dst_h){
   int i, j;
@@ -1960,6 +2036,18 @@ void *plat_gvideo_flip(void)
       need_screen_cleared = 0;
     }
 
+
+#define DEBUG_RES
+#ifdef DEBUG_RES
+    static int prev_w = 0;
+    static int prev_h = 0;
+    if(prev_w != plat_sdl_screen->w || prev_h != plat_sdl_screen->h){
+      printf("New game resolution: %dx%d\n", plat_sdl_screen->w, plat_sdl_screen->h);
+      prev_w = plat_sdl_screen->w;
+      prev_h = plat_sdl_screen->h;
+    }
+#endif
+
     switch(aspect_ratio){
       case ASPECT_RATIOS_TYPE_STRECHED:
       /*flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, hw_screen,
@@ -1975,7 +2063,11 @@ void *plat_gvideo_flip(void)
       /*flip_NNOptimized_LeftRightBilinear_GaussianWeighted(plat_sdl_screen, hw_screen,
         RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);*/
 
-      if(plat_sdl_screen->w == 320){
+      if(plat_sdl_screen->w == 320 && plat_sdl_screen->h < RES_HW_SCREEN_VERTICAL){
+        flip_Downscale_OptimizedWidth320_mergeUpDown(plat_sdl_screen, hw_screen,
+          RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);
+      }
+      else if(plat_sdl_screen->w == 320){
         flip_Downscale_LeftRightGaussianFilter_OptimizedWidth320(plat_sdl_screen, hw_screen,
           RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);
       }
