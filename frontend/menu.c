@@ -736,6 +736,7 @@ void run_menu_loop()
     MENU_DEBUG_PRINTF("Launch Menu\n");
 
     SDL_Event event;
+    SDL_Event *events;
     uint32_t prev_ms = SDL_GetTicks();
     uint32_t cur_ms = SDL_GetTicks();
     int scroll=0;
@@ -760,11 +761,27 @@ void run_menu_loop()
     memcpy(backup_hw_screen->pixels, (uint16_t *)hw_screen->pixels,
             RES_HW_SCREEN_HORIZONTAL * RES_HW_SCREEN_VERTICAL * sizeof(u16));
 
+    /// ------ Wait for menu UP key event ------
+    while(event.type != SDL_KEYUP || event.key.keysym.sym != SDLK_q){
+        while (SDL_PollEvent(&event)){
+            SDL_PushEvent(&event);
+            update_input();
+        }
+
+        /* 500ms timeout */
+        if(SDL_GetTicks() - cur_ms > 500){
+            MENU_ERROR_PRINTF("Timeout waiting for SDLK_q UP\n");
+            break;
+        }
+    }
+
+
     /// -------- Main loop ---------
     while (!stop_menu_loop)
     {
         /// -------- Handle Keyboard Events ---------
         if(!scroll){
+
             while (SDL_PollEvent(&event))
             switch(event.type)
             {

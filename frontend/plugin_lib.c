@@ -591,16 +591,25 @@ static void update_analogs(void)
 	//printf("%4d %4d %4d %4d\n", in_a1[0], in_a1[1], in_a2[0], in_a2[1]);
 }
 
-static void update_input(void)
+void update_input(void)
 {
 	int actions[IN_BINDTYPE_COUNT] = { 0, };
 	unsigned int emu_act;
 
+	//printf("\nIn %s\n", __func__);
 	in_update(actions);
 	if (in_type1 == PSE_PAD_TYPE_ANALOGPAD)
 		update_analogs();
 	emu_act = actions[IN_BINDTYPE_EMU];
-	//printf("emu_act %d 0x%02X\n", emu_act, emu_act);
+
+#if 0
+	static unsigned int emu_act_prev;
+	if(emu_act_prev != emu_act){
+		printf("emu_act %d 0x%08X\n", emu_act, emu_act);
+		emu_act_prev = emu_act;
+	}
+#endif
+
 	in_state_gun = (emu_act & SACTION_GUN_MASK) >> SACTION_GUN_TRIGGER;
 
 	emu_act &= ~SACTION_GUN_MASK;
@@ -610,6 +619,7 @@ static void update_input(void)
 			;
 		emu_act = which;
 	}
+
 	emu_set_action(emu_act);
 
 	in_keystate = actions[IN_BINDTYPE_PLAYER12];

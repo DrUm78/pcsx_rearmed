@@ -288,8 +288,11 @@ void do_emu_action(void)
 	case SACTION_ENTER_MENU:
 		toggle_fast_forward(1);
 		//menu_loop();
+
+		in_set_config_int(0, IN_CFG_BLOCKING, 1);
 		run_menu_loop();
-		printf("exiting menu\n");
+		in_set_config_int(0, IN_CFG_BLOCKING, 0);
+		//printf("exiting menu\n");
 		return;
 	case SACTION_NEXT_SSLOT:
 		state_slot++;
