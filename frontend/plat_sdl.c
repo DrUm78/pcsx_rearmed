@@ -2049,7 +2049,7 @@ void *plat_gvideo_flip(void)
 #endif
 
     switch(aspect_ratio){
-      case ASPECT_RATIOS_TYPE_STRECHED:
+      case ASPECT_RATIOS_TYPE_STRETCHED:
       /*flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, hw_screen,
         RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);*/
       /*flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
@@ -2099,7 +2099,7 @@ void *plat_gvideo_flip(void)
       break;
       default:
       printf("Wrong aspect ratio value: %d\n", aspect_ratio);
-      aspect_ratio = ASPECT_RATIOS_TYPE_STRECHED;
+      aspect_ratio = ASPECT_RATIOS_TYPE_STRETCHED;
       flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
         RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL);
       break;
