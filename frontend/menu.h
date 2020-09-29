@@ -14,26 +14,26 @@ int launch_resume_menu_loop();
 void menu_notify_mode_change(int w, int h, int bpp);
 
 enum g_opts_opts {
-	OPT_SHOWFPS = 1 << 0,
-	OPT_SHOWCPU = 1 << 1,
-	OPT_NO_FRAMELIM = 1 << 2,
-	OPT_SHOWSPU = 1 << 3,
-	OPT_TSGUN_NOTRIGGER = 1 << 4,
+    OPT_SHOWFPS = 1 << 0,
+    OPT_SHOWCPU = 1 << 1,
+    OPT_NO_FRAMELIM = 1 << 2,
+    OPT_SHOWSPU = 1 << 3,
+    OPT_TSGUN_NOTRIGGER = 1 << 4,
 };
 
 enum g_scaler_opts {
-	SCALE_1_1,
-	SCALE_2_2,
-	SCALE_4_3,
-	SCALE_4_3v2,
-	SCALE_FULLSCREEN,
-	SCALE_CUSTOM,
+    SCALE_1_1,
+    SCALE_2_2,
+    SCALE_4_3,
+    SCALE_4_3v2,
+    SCALE_FULLSCREEN,
+    SCALE_CUSTOM,
 };
 
 enum g_soft_filter_opts {
-	SOFT_FILTER_NONE,
-	SOFT_FILTER_SCALE2X,
-	SOFT_FILTER_EAGLE2X,
+    SOFT_FILTER_NONE,
+    SOFT_FILTER_SCALE2X,
+    SOFT_FILTER_EAGLE2X,
 };
 
 typedef enum{
@@ -75,7 +75,7 @@ typedef enum {RESUME_OPTIONS} ENUM_RESUME_OPTIONS;
 ////------ Defines to be shared -------
 #define STEP_CHANGE_VOLUME          10
 #define STEP_CHANGE_BRIGHTNESS      10
-#define NOTIF_SECONDS_DISP			2
+#define NOTIF_SECONDS_DISP          2
 
 ////------ Menu commands -------
 #define SHELL_CMD_VOLUME_GET                "volume_get"
@@ -85,6 +85,7 @@ typedef enum {RESUME_OPTIONS} ENUM_RESUME_OPTIONS;
 #define SHELL_CMD_POWERDOWN                 "shutdown_funkey"
 #define SHELL_CMD_SCHEDULE_POWERDOWN        "sched_shutdown"
 #define SHELL_CMD_NOTIF                     "notif_set"
+#define SHELL_CMD_NOTIF_CLEAR               "notif_clear"
 #define SHELL_CMD_WRITE_QUICK_LOAD_CMD      "write_args_quick_load_file"
 
 ////------ Global variables -------
