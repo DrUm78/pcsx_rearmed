@@ -396,6 +396,7 @@ do_state_slot:
 		break;
 	case SACTION_SCREENSHOT:
 		{
+#ifdef SCREENSHOTS_ALLOWED
 			char buf[MAXPATHLEN];
 			void *scrbuf;
 			int w, h, bpp;
@@ -412,6 +413,7 @@ do_state_slot:
 				ret = writepng(buf, scrbuf, w, h);
 			if (ret == 0)
 				snprintf(hud_msg, sizeof(hud_msg), "SCREENSHOT TAKEN");
+#endif //SCREENSHOTS_ALLOWED
 			break;
 		}
 	case SACTION_VOLUME_DOWN:
@@ -687,7 +689,9 @@ static void check_profile(void) {
 	create_profile_dir(CHEATS_DIR);
 	create_profile_dir(PATCHES_DIR);
 	create_profile_dir(PCSX_DOT_DIR "cfg");
+#ifdef SCREENSHOTS_ALLOWED
 	create_profile_dir("/screenshots/");
+#endif //SCREENSHOTS_ALLOWED
 }
 
 static void check_memcards(void)

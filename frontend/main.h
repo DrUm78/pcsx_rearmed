@@ -21,15 +21,15 @@
 
 #include "config.h"
 
-#define DEFAULT_MEM_CARD_1 "/.pcsx/memcards/card1.mcd"
-#define DEFAULT_MEM_CARD_2 "/.pcsx/memcards/card2.mcd"
-#define MEMCARD_DIR "/.pcsx/memcards/"
-#define PLUGINS_DIR "/.pcsx/plugins/"
-#define PLUGINS_CFG_DIR "/.pcsx/plugins/cfg/"
-#define PCSX_DOT_DIR "/.pcsx/"
-#define STATES_DIR "/.pcsx/sstates/"
-#define CHEATS_DIR "/.pcsx/cheats/"
-#define PATCHES_DIR "/.pcsx/patches/"
+#define DEFAULT_MEM_CARD_1 "/mnt/PS1/memcards/card1.mcd"
+#define DEFAULT_MEM_CARD_2 "/mnt/PS1/memcards/card2.mcd"
+#define MEMCARD_DIR "/mnt/PS1/memcards/"
+#define PLUGINS_DIR "/root/.pcsx/plugins/"
+#define PLUGINS_CFG_DIR "/root/.pcsx/plugins/cfg/"
+#define PCSX_DOT_DIR "/root/.pcsx/"
+#define STATES_DIR "/root/.pcsx/sstates/"
+#define CHEATS_DIR "/root/.pcsx/cheats/"
+#define PATCHES_DIR "/root/.pcsx/patches/"
 #define BIOS_DIR "/mnt/PS1/bios/"
 
 extern char cfgfile_basename[MAXPATHLEN];
