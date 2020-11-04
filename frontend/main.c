@@ -1198,7 +1198,7 @@ static int _OpenPlugins(void) {
 		char path[MAXPATHLEN];
 		char dotdir[MAXPATHLEN];
 
-		MAKE_ABSOLUTE_PATH(dotdir, "/root/.pcsx/plugins/", NULL);
+		MAKE_ABSOLUTE_PATH(dotdir, "~/.pcsx/plugins/", NULL);
 
 		strcpy(info.EmuName, "PCSX");
 		strncpy(info.CdromID, CdromId, 9);
