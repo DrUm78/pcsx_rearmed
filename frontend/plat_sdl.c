@@ -223,7 +223,8 @@ void plat_init(void)
         exit(EXIT_FAILURE);
   }
 
-  hw_screen = SDL_SetVideoMode(RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL, 16, SDL_FULLSCREEN | SDL_HWSURFACE | SDL_DOUBLEBUF);
+  hw_screen = SDL_SetVideoMode(RES_HW_SCREEN_HORIZONTAL, RES_HW_SCREEN_VERTICAL,
+    16, SDL_FULLSCREEN | SDL_HWSURFACE | SDL_DOUBLEBUF);
   if(hw_screen == NULL)
   {
         printf("Error SDL_SetVideoMode: %s\n", SDL_GetError());
@@ -2014,9 +2015,9 @@ void *plat_gvideo_flip(void)
   }
   else {
 
-    if ( SDL_MUSTLOCK(hw_screen) ) {
+    /*if ( SDL_MUSTLOCK(hw_screen) ) {
         SDL_UnlockSurface(hw_screen);
-    }
+    }*/
 
     //printf("w:%d,h:%d\n", plat_sdl_screen->w, plat_sdl_screen->h);
 
@@ -2113,9 +2114,9 @@ void *plat_gvideo_flip(void)
     /// Flip Display
     SDL_Flip(hw_screen);
 
-    if ( SDL_MUSTLOCK(hw_screen) ) {
+    /*if ( SDL_MUSTLOCK(hw_screen) ) {
         SDL_LockSurface(hw_screen);
-    }
+    }*/
 
     return plat_sdl_screen->pixels;
   }
