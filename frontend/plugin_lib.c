@@ -34,7 +34,7 @@
 #include "../libpcsxcore/psxmem_map.h"
 #include "../plugins/dfinput/externals.h"
 
-#define HUD_HEIGHT 10
+#define HUD_HEIGHT 20
 
 int in_type1, in_type2;
 int in_a1[2] = { 127, 127 }, in_a2[2] = { 127, 127 };
@@ -111,6 +111,26 @@ static void print_fps(int h, int border)
 	hud_printf(pl_vout_buf, pl_vout_w, border + 2, h - HUD_HEIGHT,
 		"%2d %4.1f", pl_rearmed_cbs.flips_per_sec,
 		pl_rearmed_cbs.vsps_cur);
+
+#define PRINT_FPS_AVG	200
+#ifdef PRINT_FPS_AVG
+	static int flip_per_sec_avg = 0;
+	static float vsps_cur_avg = 0;
+	static int fps_measurements = 0;
+
+	flip_per_sec_avg += pl_rearmed_cbs.flips_per_sec;
+	vsps_cur_avg += pl_rearmed_cbs.vsps_cur;
+	fps_measurements++;
+
+	if(fps_measurements >= PRINT_FPS_AVG){
+		printf("FPS=%2d %4.1f\n", flip_per_sec_avg/fps_measurements, vsps_cur_avg/fps_measurements);
+
+		flip_per_sec_avg = 0;
+		vsps_cur_avg = 0;
+		fps_measurements = 0;
+	}
+	
+#endif //PRINT_FPS_AVG
 }
 
 static void print_cpu_usage(int w, int h, int border)
@@ -591,15 +611,25 @@ static void update_analogs(void)
 	//printf("%4d %4d %4d %4d\n", in_a1[0], in_a1[1], in_a2[0], in_a2[1]);
 }
 
-static void update_input(void)
+void update_input(void)
 {
 	int actions[IN_BINDTYPE_COUNT] = { 0, };
 	unsigned int emu_act;
 
+	//printf("\nIn %s\n", __func__);
 	in_update(actions);
 	if (in_type1 == PSE_PAD_TYPE_ANALOGPAD)
 		update_analogs();
 	emu_act = actions[IN_BINDTYPE_EMU];
+
+#if 0
+	static unsigned int emu_act_prev;
+	if(emu_act_prev != emu_act){
+		printf("emu_act %d 0x%08X\n", emu_act, emu_act);
+		emu_act_prev = emu_act;
+	}
+#endif
+
 	in_state_gun = (emu_act & SACTION_GUN_MASK) >> SACTION_GUN_TRIGGER;
 
 	emu_act &= ~SACTION_GUN_MASK;
@@ -609,6 +639,7 @@ static void update_input(void)
 			;
 		emu_act = which;
 	}
+
 	emu_set_action(emu_act);
 
 	in_keystate = actions[IN_BINDTYPE_PLAYER12];
@@ -647,6 +678,10 @@ void pl_frame_limit(void)
 	/* doing input here because the pad is polled
 	 * thousands of times per frame for some reason */
 	update_input();
+	if (emu_action == SACTION_NONE && emu_action_future != SACTION_NONE){
+		emu_set_action(emu_action_future);
+		emu_action_future = SACTION_NONE;
+	}
 
 	pcnt_end(PCNT_ALL);
 	gettimeofday(&now, 0);

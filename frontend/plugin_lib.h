@@ -36,6 +36,8 @@ void  pl_switch_dispmode(void);
 void  pl_timing_prepare(int is_pal);
 void  pl_frame_limit(void);
 
+extern void update_input(void);
+
 struct rearmed_cbs {
 	void  (*pl_get_layer_pos)(int *x, int *y, int *w, int *h);
 	int   (*pl_vout_open)(void);

@@ -527,6 +527,8 @@ int Load(const char *ExePath) {
 }
 
 // STATES
+//#define SAVE_COMPRESSED
+#ifdef SAVE_COMPRESSED
 
 static void *zlib_open(const char *name, const char *mode)
 {
@@ -557,6 +559,39 @@ struct PcsxSaveFuncs SaveFuncs = {
 	zlib_open, zlib_read, zlib_write, zlib_seek, zlib_close
 };
 
+#else //SAVE_COMPRESSED
+
+static void *file_open(const char *name, const char *mode)
+{
+	return (void *)fopen(name, mode);
+}
+
+static int file_read(void *file, void *buf, u32 len)
+{
+	return fread(buf, 1, len, (FILE *)file);
+}
+
+static int file_write(void *file, const void *buf, u32 len)
+{
+	return fwrite(buf, 1, len, (FILE *)file);
+}
+
+static long file_seek(void *file, long offs, int whence)
+{
+	return fseek((FILE *)file, offs, whence);
+}
+
+static void file_close(void *file)
+{
+	fclose((FILE *)file);
+}
+
+struct PcsxSaveFuncs SaveFuncs = {
+	file_open, file_read, file_write, file_seek, file_close
+};
+
+#endif //SAVE_COMPRESSED
+
 static const char PcsxHeader[32] = "STv4 PCSX v" PACKAGE_VERSION;
 
 // Savestate Versioning!
@@ -568,7 +603,6 @@ int SaveState(const char *file) {
 	GPUFreeze_t *gpufP;
 	SPUFreeze_t *spufP;
 	int Size;
-	unsigned char *pMem;
 
 	f = SaveFuncs.open(file, "wb");
 	if (f == NULL) return -1;
@@ -579,9 +613,10 @@ int SaveState(const char *file) {
 	SaveFuncs.write(f, (void *)&SaveVersion, sizeof(u32));
 	SaveFuncs.write(f, (void *)&Config.HLE, sizeof(boolean));
 
-	pMem = (unsigned char *)malloc(128 * 96 * 3);
+	/* Not done here or in loading to speed up the process*/
+	unsigned char *pMem = (unsigned char *)malloc(128 * 96 * 3);
 	if (pMem == NULL) return -1;
-	GPU_getScreenPic(pMem);
+	//GPU_getScreenPic(pMem); //To go faster
 	SaveFuncs.write(f, pMem, 128 * 96 * 3);
 	free(pMem);
 
@@ -650,6 +685,7 @@ int LoadState(const char *file) {
 		psxBiosInit();
 
 	psxCpu->Reset();
+
 	SaveFuncs.seek(f, 128 * 96 * 3, SEEK_CUR);
 
 	SaveFuncs.read(f, psxM, 0x00200000);

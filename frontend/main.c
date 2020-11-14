@@ -20,6 +20,7 @@
 #include "plugin_lib.h"
 #include "pcnt.h"
 #include "menu.h"
+#include "configfile_fk.h"
 #include "plat.h"
 #include "../libpcsxcore/misc.h"
 #include "../libpcsxcore/cheat.h"
@@ -38,6 +39,8 @@ static void toggle_fast_forward(int force_off);
 static void check_profile(void);
 static void check_memcards(void);
 #endif
+
+#define BOOT_MSG " "
 #ifndef BOOT_MSG
 #define BOOT_MSG "Booting up..."
 #endif
@@ -48,21 +51,93 @@ void StopDebugger();
 
 int ready_to_go, g_emu_want_quit, g_emu_resetting;
 unsigned long gpuDisp;
+int need_screen_cleared;
 char cfgfile_basename[MAXPATHLEN];
 int state_slot;
 enum sched_action emu_action, emu_action_old;
+enum sched_action emu_action_future = SACTION_NONE;
+int mQuickSaveAndPoweroff=0;
 char hud_msg[64];
 int hud_new_msg;
+char *prog_name = NULL;
+char *cdfile = NULL;
+char *cdPath = NULL;
+static char *quick_save_file_extension = "quicksave";
+char *quick_save_file = NULL;
+char *cfg_file_default = NULL;
+char *cfg_file_rom = NULL;
+static char *cfg_file_default_name = "default_config";
+static char *cfg_file_extension = "fkcfg";
 
-static void make_path(char *buf, size_t size, const char *dir, const char *fname)
+
+
+/* Quick save and turn off the console */
+void quick_save_and_poweroff()
+{
+    FILE *fp;
+    printf("Save Instant Play file\n");
+
+    /* Send command to cancel any previously scheduled powerdown */
+    fp = popen(SHELL_CMD_CANCEL_SCHED_POWERDOWN, "r");
+    if (fp == NULL)
+    {
+        /* Countdown is still ticking, so better do nothing
+	   than start writing and get interrupted!
+	*/
+        printf("Failed to cancel scheduled shutdown\n");
+	exit(0);
+    }
+    pclose(fp);
+
+    /* Save  */
+    if(SaveState(quick_save_file)){
+	printf("Save failed");
+	return;
+    }
+
+    /* Perform Instant Play save and shutdown */
+    execlp(SHELL_CMD_INSTANT_PLAY, SHELL_CMD_INSTANT_PLAY,
+	   prog_name, "-cdfile", cdfile, "-loadf", quick_save_file, NULL);
+
+    /* Should not be reached */
+    printf("Failed to perform Instant Play save and shutdown\n");
+
+    /* Exit Emulator */
+    exit(0);
+}
+
+/* Handler for SIGUSR1, caused by closing the console */
+void handle_sigusr1(int sig)
+{
+    //printf("Caught signal USR1 %d\n", sig);
+
+    /* Exit menu if it was launched */
+    stop_menu_loop = 1;
+
+    /* Signal to quick save and poweoff after next loop */
+    emu_set_action(SACTION_QUICK_SAVE_AND_POWEROFF);
+    mQuickSaveAndPoweroff = 1;
+}
+
+static void make_relative_path(char *buf, size_t size, const char *dir, const char *fname)
 {
 	if (fname)
 		snprintf(buf, size, ".%s%s", dir, fname);
 	else
 		snprintf(buf, size, ".%s", dir);
 }
-#define MAKE_PATH(buf, dir, fname) \
-	make_path(buf, sizeof(buf), dir, fname)
+#define MAKE_RELATIVE_PATH(buf, dir, fname) \
+	make_relative_path(buf, sizeof(buf), dir, fname)
+
+static void make_absolute_path(char *buf, size_t size, const char *dir, const char *fname)
+{
+	if (fname)
+		snprintf(buf, size, "%s%s", dir, fname);
+	else
+		snprintf(buf, size, "%s", dir);
+}
+#define MAKE_ABSOLUTE_PATH(buf, dir, fname) \
+	make_absolute_path(buf, sizeof(buf), dir, fname)
 
 static int get_gameid_filename(char *buf, int size, const char *fmt, int i) {
 	char trimlabel[33];
@@ -84,7 +159,7 @@ static int get_gameid_filename(char *buf, int size, const char *fmt, int i) {
 void set_cd_image(const char *fname)
 {
 	const char *ext = NULL;
-	
+
 	if (fname != NULL)
 		ext = strrchr(fname, '.');
 
@@ -104,9 +179,9 @@ static void set_default_paths(void)
 {
 #ifndef NO_FRONTEND
 	snprintf(Config.PatchesDir, sizeof(Config.PatchesDir), "." PATCHES_DIR);
-	MAKE_PATH(Config.Mcd1, MEMCARD_DIR, "card1.mcd");
-	MAKE_PATH(Config.Mcd2, MEMCARD_DIR, "card2.mcd");
-	strcpy(Config.BiosDir, "bios");
+	MAKE_ABSOLUTE_PATH(Config.Mcd1, MEMCARD_DIR, "card1.mcd");
+	MAKE_ABSOLUTE_PATH(Config.Mcd2, MEMCARD_DIR, "card2.mcd");
+	strcpy(Config.BiosDir, "/mnt/PS1/bios");
 #endif
 
 	strcpy(Config.PluginsDir, "plugins");
@@ -159,22 +234,67 @@ void emu_set_default_config(void)
 void do_emu_action(void)
 {
 	int ret;
-
+	char shell_cmd[100];
+	FILE *fp;
 	emu_action_old = emu_action;
 
 	switch (emu_action) {
+	case SACTION_QUICK_SAVE_AND_POWEROFF:
+		quick_save_and_poweroff();
+		mQuickSaveAndPoweroff = 0;
+		break;
 	case SACTION_LOAD_STATE:
+		//snprintf(hud_msg, sizeof(hud_msg), "LOADING FROM SLOT %d...", state_slot+1);
+		sprintf(shell_cmd, "%s %d \"    LOADING FROM SLOT %d...\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
 		ret = emu_load_state(state_slot);
-		snprintf(hud_msg, sizeof(hud_msg), ret == 0 ? "LOADED" : "FAIL!");
+		//snprintf(hud_msg, sizeof(hud_msg), "%s FROM SLOT %d", ret == 0 ? "LOADED" : "FAILED TO LOAD", state_slot+1);
+		//hud_new_msg = 4;
+		sprintf(shell_cmd, "%s %d \"%s FROM SLOT %d\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, ret == 0 ? "      LOADED" : "  FAILED TO LOAD", state_slot+1);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
+		}
+		break;
+	case SACTION_PRE_SAVE_STATE:
+		/*snprintf(hud_msg, sizeof(hud_msg), "SAVING IN SLOT %d...", state_slot+1);
+		  hud_new_msg = 4;*/
+		sprintf(shell_cmd, "%s %d \"      SAVING IN SLOT %d...\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
+		}
+
+		emu_action_future = SACTION_SAVE_STATE;
 		break;
 	case SACTION_SAVE_STATE:
 		ret = emu_save_state(state_slot);
-		snprintf(hud_msg, sizeof(hud_msg), ret == 0 ? "SAVED" : "FAIL!");
+		/*snprintf(hud_msg, sizeof(hud_msg), "%s IN SLOT %d", ret == 0 ? "SAVED" : "FAILED TO LOAD", state_slot+1);
+		  hud_new_msg = 4;*/
+		sprintf(shell_cmd, "%s %d \"%s IN SLOT %d\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, ret == 0 ? "        SAVED" : "  FAILED TO SAVE", state_slot+1);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
+		}
 		break;
 #ifndef NO_FRONTEND
 	case SACTION_ENTER_MENU:
 		toggle_fast_forward(1);
-		menu_loop();
+		//menu_loop();
+
+		in_set_config_int(0, IN_CFG_BLOCKING, 1);
+		run_menu_loop();
+		in_set_config_int(0, IN_CFG_BLOCKING, 0);
+		//printf("exiting menu\n");
 		return;
 	case SACTION_NEXT_SSLOT:
 		state_slot++;
@@ -202,12 +322,74 @@ do_state_slot:
 		plugin_call_rearmed_cbs();
 		break;
 	case SACTION_SWITCH_DISPMODE:
-		pl_switch_dispmode();
-		plugin_call_rearmed_cbs();
-		if (GPU_open != NULL && GPU_close != NULL) {
-			GPU_close();
-			GPU_open(&gpuDisp, "PCSX", NULL);
+		aspect_ratio = (aspect_ratio+1)%NB_ASPECT_RATIOS_TYPES;
+		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
+			//snprintf(hud_msg, sizeof(hud_msg), "    DISPLAY MODE: ZOOMED %d%%", aspect_ratio_factor_percent);
+			sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: ZOOMED %d%%%%\"",
+				SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		}
+		else{
+			//snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: %s", aspect_ratio_name[aspect_ratio]);
+			sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: %s\"",
+				SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_name[aspect_ratio]);
+		}
+		//hud_new_msg = 4;
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
+		}
+
+        // Save config file
+        configfile_save(cfg_file_rom);
+		break;
+	case SACTION_ASPECT_RATIO_FACTOR_DECREASE:
+		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
+			aspect_ratio_factor_percent = (aspect_ratio_factor_percent>aspect_ratio_factor_step)?
+				aspect_ratio_factor_percent-aspect_ratio_factor_step:0;
+			need_screen_cleared = 1;
+		}
+		else{
+			aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
+		}
+		/*snprintf(hud_msg, sizeof(hud_msg), "    DISPLAY MODE: ZOOMED %d%%", aspect_ratio_factor_percent);
+		  hud_new_msg = 4;*/
+		sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: ZOOMED %d%%%%\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
+		}
+
+        // Save config file
+        configfile_save(cfg_file_rom);
+		break;
+	case SACTION_ASPECT_RATIO_FACTOR_INCREASE:
+		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
+			aspect_ratio_factor_percent = (aspect_ratio_factor_percent+aspect_ratio_factor_step<100)?
+				aspect_ratio_factor_percent+aspect_ratio_factor_step:100;
+			need_screen_cleared = 1;
+		}
+		else{
+			aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
+		}
+		aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
+		/*snprintf(hud_msg, sizeof(hud_msg), "    DISPLAY MODE: ZOOMED %d%%", aspect_ratio_factor_percent);
+		  hud_new_msg = 4;*/
+		sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: ZOOMED %d%%%%\"",
+			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
+		}
+
+        // Save config file
+        configfile_save(cfg_file_rom);
 		break;
 	case SACTION_FAST_FORWARD:
 		toggle_fast_forward(0);
@@ -231,6 +413,7 @@ do_state_slot:
 		break;
 	case SACTION_SCREENSHOT:
 		{
+#ifdef SCREENSHOTS_ALLOWED
 			char buf[MAXPATHLEN];
 			void *scrbuf;
 			int w, h, bpp;
@@ -247,16 +430,69 @@ do_state_slot:
 				ret = writepng(buf, scrbuf, w, h);
 			if (ret == 0)
 				snprintf(hud_msg, sizeof(hud_msg), "SCREENSHOT TAKEN");
+#endif //SCREENSHOTS_ALLOWED
 			break;
 		}
-	case SACTION_VOLUME_UP:
 	case SACTION_VOLUME_DOWN:
-		{
-			static int volume;
-			plat_target_step_volume(&volume,
-				emu_action == SACTION_VOLUME_UP ? 1 : -1);
+		snprintf(hud_msg, sizeof(hud_msg), "VOLUME %d%%", volume_percentage);
+		hud_new_msg = 4;
+		/// ----- Compute new value -----
+		volume_percentage = (volume_percentage < STEP_CHANGE_VOLUME)?
+			0:(volume_percentage-STEP_CHANGE_VOLUME);
+		/// ----- Shell cmd ----
+		sprintf(shell_cmd, "%s %d", SHELL_CMD_VOLUME_SET, volume_percentage);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
-		return;
+		break;
+	case SACTION_VOLUME_UP:
+		snprintf(hud_msg, sizeof(hud_msg), "VOLUME %d%%", volume_percentage);
+		hud_new_msg = 4;
+		/// ----- Compute new value -----
+		volume_percentage = (volume_percentage > 100 - STEP_CHANGE_VOLUME)?
+			100:(volume_percentage+STEP_CHANGE_VOLUME);
+		/// ----- Shell cmd ----
+		sprintf(shell_cmd, "%s %d", SHELL_CMD_VOLUME_SET, volume_percentage);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
+		}
+		break;
+	case SACTION_BRIGHTNESS_DOWN:
+		snprintf(hud_msg, sizeof(hud_msg), "BRIGHTNESS %d%%", brightness_percentage);
+		hud_new_msg = 4;
+		/// ----- System brightness change -----
+		brightness_percentage = (brightness_percentage < STEP_CHANGE_BRIGHTNESS)?
+			0:(brightness_percentage-STEP_CHANGE_BRIGHTNESS);
+		/// ----- Shell cmd ----
+		sprintf(shell_cmd, "%s %d", SHELL_CMD_BRIGHTNESS_SET, brightness_percentage);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
+		}
+		break;
+	case SACTION_BRIGHTNESS_UP:
+		snprintf(hud_msg, sizeof(hud_msg), "BRIGHTNESS %d%%", brightness_percentage);
+		hud_new_msg = 4;
+		/// ----- System brightness change -----
+		brightness_percentage = (brightness_percentage > 100 - STEP_CHANGE_BRIGHTNESS)?
+			100:(brightness_percentage+STEP_CHANGE_BRIGHTNESS);
+		/// ----- Shell cmd ----
+		sprintf(shell_cmd, "%s %d", SHELL_CMD_BRIGHTNESS_SET, brightness_percentage);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
+		}
+		break;
 	case SACTION_MINIMIZE:
 		if (GPU_close != NULL)
 			GPU_close();
@@ -462,7 +698,7 @@ void emu_core_ask_exit(void)
 static void create_profile_dir(const char *directory) {
 	char path[MAXPATHLEN];
 
-	MAKE_PATH(path, directory, NULL);
+	MAKE_ABSOLUTE_PATH(path, directory, NULL);
 	mkdir(path, S_IRWXU | S_IRWXG);
 }
 
@@ -478,7 +714,9 @@ static void check_profile(void) {
 	create_profile_dir(CHEATS_DIR);
 	create_profile_dir(PATCHES_DIR);
 	create_profile_dir(PCSX_DOT_DIR "cfg");
+#ifdef SCREENSHOTS_ALLOWED
 	create_profile_dir("/screenshots/");
+#endif //SCREENSHOTS_ALLOWED
 }
 
 static void check_memcards(void)
@@ -488,7 +726,7 @@ static void check_memcards(void)
 	int i;
 
 	for (i = 1; i <= 9; i++) {
-		snprintf(buf, sizeof(buf), ".%scard%d.mcd", MEMCARD_DIR, i);
+		snprintf(buf, sizeof(buf), "%scard%d.mcd", MEMCARD_DIR, i);
 
 		f = fopen(buf, "rb");
 		if (f == NULL) {
@@ -504,27 +742,40 @@ int main(int argc, char *argv[])
 {
 	char file[MAXPATHLEN] = "";
 	char path[MAXPATHLEN];
-	const char *cdfile = NULL;
 	const char *loadst_f = NULL;
 	int psxout = 0;
 	int loadst = 0;
 	int i;
 
+	/* Save program name */
+	prog_name = argv[0];
+
 	emu_core_preinit();
+
+	if (argc <= 1){
+		printf("Not enough args specified, exit\n");
+		exit(EXIT_FAILURE);
+	};
 
 	// read command line options
 	for (i = 1; i < argc; i++) {
 		     if (!strcmp(argv[i], "-psxout")) psxout = 1;
 		else if (!strcmp(argv[i], "-load")) loadst = atol(argv[++i]);
 		else if (!strcmp(argv[i], "-cfg")) {
-			if (i+1 >= argc) break;
+			if (i+1 >= argc){
+				printf("Config file not specified, exit\n");
+				exit(EXIT_FAILURE);
+			};
 			strncpy(cfgfile_basename, argv[++i], MAXPATHLEN-100);	/* TODO buffer overruns */
 			SysPrintf("Using config file %s.\n", cfgfile_basename);
 		}
 		else if (!strcmp(argv[i], "-cdfile")) {
 			char isofilename[MAXPATHLEN];
 
-			if (i+1 >= argc) break;
+			if (i+1 >= argc){
+				printf("cdfile arg present but cd file not specified, exit\n");
+				exit(EXIT_FAILURE);
+			};
 			strncpy(isofilename, argv[++i], MAXPATHLEN);
 			if (isofilename[0] != '/') {
 				getcwd(path, MAXPATHLEN);
@@ -536,11 +787,71 @@ int main(int argc, char *argv[])
 					isofilename[0] = 0;
 			}
 
-			cdfile = isofilename;
+			cdfile = (char*) malloc(strlen(isofilename)*sizeof(char));
+			strcpy(cdfile, isofilename);
+			printf("cdfile = %s\n", cdfile);
+
+			/* Check if rom file exists, Save ROM name, and ROM path */
+			FILE *f = fopen(cdfile, "rb");
+			if (f) {
+				/* Save Rom path */
+				cdPath = (char *) malloc(strlen(cdfile)*sizeof(char));
+				strcpy(cdPath, cdfile);
+				char *slash = strrchr ((char*)cdPath, '/');
+				*slash = 0;
+				printf("cdPath: %s\n", cdPath);
+
+				/* Rom name without extension */
+				char *point = strrchr ((char*)slash+1, '.');
+				*point = 0;
+				char *cdfile_no_ext = slash+1;
+
+				/* Set quicksave filename */
+				quick_save_file = (char *) malloc( (strlen(cdfile) +
+					strlen(cdfile_no_ext) +
+					strlen(quick_save_file_extension) + 2) * sizeof(char) );
+				sprintf(quick_save_file, "%s/%s.%s",
+					cdPath, cdfile_no_ext, quick_save_file_extension);
+				printf("quick_save_file: %s\n", quick_save_file);
+				
+		        /* Set rom cfg filepath */
+		        cfg_file_rom = (char *)malloc(strlen(cdPath) + strlen(slash+1) +
+		          strlen(cfg_file_extension) + 2 + 1);
+		        sprintf(cfg_file_rom, "%s/%s.%s",
+		          cdPath, slash+1, cfg_file_extension);
+		        printf("cfg_file_rom: %s\n", cfg_file_rom);
+
+		        /* Set console cfg filepath */
+		        cfg_file_default = (char *)malloc(strlen(cdPath) + strlen(cfg_file_default_name) +
+		          strlen(cfg_file_extension) + 2 + 1);
+		        sprintf(cfg_file_default, "%s/%s.%s",
+		          cdPath, cfg_file_default_name, cfg_file_extension);
+		        printf("cfg_file_default: %s\n", cfg_file_default);
+
+		        /** Load config files */
+		        configfile_load(cfg_file_default);
+		        configfile_load(cfg_file_rom);
+
+				fclose(f);
+			}
+			else{
+				SysMessage("cdfile not found!");
+				return 1;
+			}
 		}
 		else if (!strcmp(argv[i], "-loadf")) {
 			if (i+1 >= argc) break;
 			loadst_f = argv[++i];
+		}
+		else if (!strcmp(argv[i], "-fps")) {
+			printf("Show FPS\n");
+			g_opts |= OPT_SHOWFPS;
+		}
+		else if (!strcmp(argv[i], "-frameskip")) {
+			printf("Frameskip ON\n");
+			//pl_rearmed_cbs.frameskip = -1;
+			pl_rearmed_cbs.frameskip = 1;
+			plugin_call_rearmed_cbs();
 		}
 		else if (!strcmp(argv[i], "-h") ||
 			 !strcmp(argv[i], "-help") ||
@@ -553,6 +864,9 @@ int main(int argc, char *argv[])
 							"\t-cfg FILE\tLoads desired configuration file (default: ~/.pcsx/pcsx.cfg)\n"
 							"\t-psxout\t\tEnable PSX output\n"
 							"\t-load STATENUM\tLoads savestate STATENUM (1-5)\n"
+							"\t-loadf save_file\tLoads from save file\n"
+							"\t-fps\t\tDisplays FPS\n"
+							"\t-frameskip\tset frameskip on\n"
 							"\t-h -help\tDisplay this message\n"
 							"\tfile\t\tLoads a PSX EXE file\n"));
 			 return 0;
@@ -573,6 +887,9 @@ int main(int argc, char *argv[])
 	if (cdfile)
 		set_cd_image(cdfile);
 
+    /* Set env var for no mouse */
+    putenv(strdup("SDL_NOMOUSE=1"));
+
 	// frontend stuff
 	// init input but leave probing to platform code,
 	// they add input drivers and may need to modify them after probe
@@ -580,6 +897,8 @@ int main(int argc, char *argv[])
 	pl_init();
 	plat_init();
 	menu_init(); // loads config
+
+	check_bioses();
 
 	if (emu_core_init() != 0)
 		return 1;
@@ -606,6 +925,10 @@ int main(int argc, char *argv[])
 	CheckCdrom();
 	SysReset();
 
+	/* Init Signals */
+	signal(SIGUSR1, handle_sigusr1);
+
+
 	if (file[0] != '\0') {
 		if (Load(file) != -1)
 			ready_to_go = 1;
@@ -625,21 +948,48 @@ int main(int argc, char *argv[])
 		int ret = LoadState(loadst_f);
 		SysPrintf("%s state file: %s\n",
 			ret ? "failed to load" : "loaded", loadst_f);
-		ready_to_go |= ret == 0;
+		ready_to_go |= (ret == 0);
 	}
 
 	if (ready_to_go) {
 		menu_prepare_emu();
 
 		// If a state has been specified, then load that
-		if (loadst) {
+		if (!loadst_f && loadst) {
 			int ret = emu_load_state(loadst - 1);
 			SysPrintf("%s state %d\n",
 				ret ? "failed to load" : "loaded", loadst);
 		}
+		/* Load quick save file */
+		else if(!loadst_f && access( quick_save_file, F_OK ) != -1){
+			printf("Found quick save file: %s\n", quick_save_file);
+
+			int resume = launch_resume_menu_loop();
+			if(resume == RESUME_YES){
+				printf("Resume game from quick save file: %s\n", quick_save_file);
+				int ret = LoadState(quick_save_file);
+				ready_to_go |= ret == 0;
+				SysPrintf("%s state file: %s\n",
+					ret ? "failed to load" : "loaded", quick_save_file);
+			}
+			else{
+				printf("Reset game\n");
+
+				/* Remove quicksave file if present */
+				if (remove(quick_save_file) == 0){
+					printf("Deleted successfully: %s\n", quick_save_file);
+				}
+				else{
+					printf("Unable to delete the file: %s\n", quick_save_file);
+				}
+			}
+		}
 	}
-	else
+	/*else{
+		/// We deliberately do not show the menu but exit the game if load failed
 		menu_loop();
+	}*/
+
 
 	pl_start_watchdog();
 
@@ -649,8 +999,24 @@ int main(int argc, char *argv[])
 		emu_action = SACTION_NONE;
 
 		psxCpu->Execute();
-		if (emu_action != SACTION_NONE)
+
+		if (emu_action == SACTION_NONE && emu_action_future != SACTION_NONE){
+			emu_set_action(emu_action_future);
+			emu_action_future = SACTION_NONE;
+		}
+
+		if (emu_action != SACTION_NONE){
 			do_emu_action();
+		}
+
+		// Force Quick save and poweroff
+		if(mQuickSaveAndPoweroff){
+			quick_save_and_poweroff();
+
+			/*kill_scheduled_shutdown();
+			emu_action_future = SACTION_QUICK_SAVE_AND_POWEROFF;*/
+			//mQuickSaveAndPoweroff = 0;
+		}
 	}
 
 	printf("Exit..\n");
@@ -747,8 +1113,13 @@ void SysUpdate() {
 }
 
 int get_state_filename(char *buf, int size, int i) {
-	return get_gameid_filename(buf, size,
-		"." STATES_DIR "%.32s-%.9s.%3.3d", i);
+	/*return get_gameid_filename(buf, size,
+		"." STATES_DIR "%.32s-%.9s.%3.3d", i);*/
+
+	char *romDataFmt = "%.32s-%.9s.%3.3d";
+	char *save_path_formated = (char*)malloc(strlen(romDataFmt)+strlen(cdPath)+2);
+	sprintf(save_path_formated, "%s/%s", cdPath, romDataFmt);
+	return get_gameid_filename(buf, size, save_path_formated , i);
 }
 
 int emu_check_state(int slot)
@@ -871,7 +1242,7 @@ static int _OpenPlugins(void) {
 		char path[MAXPATHLEN];
 		char dotdir[MAXPATHLEN];
 
-		MAKE_PATH(dotdir, "/.pcsx/plugins/", NULL);
+		MAKE_ABSOLUTE_PATH(dotdir, "~/.pcsx/plugins/", NULL);
 
 		strcpy(info.EmuName, "PCSX");
 		strncpy(info.CdromID, CdromId, 9);
