@@ -1747,12 +1747,20 @@ static char *get_cd_label(void)
 	return trimlabel;
 }
 
-static void make_cfg_fname(char *buf, size_t size, int is_game)
+static void make_relative_cfg_fname(char *buf, size_t size, int is_game)
 {
 	if (is_game)
 		snprintf(buf, size, "." PCSX_DOT_DIR "cfg/%.32s-%.9s.cfg", get_cd_label(), CdromId);
 	else
 		snprintf(buf, size, "." PCSX_DOT_DIR "%s", cfgfile_basename);
+}
+
+static void make_absolute_cfg_fname(char *buf, size_t size, int is_game)
+{
+    if (is_game)
+        snprintf(buf, size, PCSX_DOT_DIR "cfg/%.32s-%.9s.cfg", get_cd_label(), CdromId);
+    else
+        snprintf(buf, size, PCSX_DOT_DIR "%s", cfgfile_basename);
 }
 
 static void keys_write_all(FILE *f);
@@ -1766,7 +1774,7 @@ static int menu_write_config(int is_game)
 
 	config_save_counter++;
 
-	make_cfg_fname(cfgfile, sizeof(cfgfile), is_game);
+	make_absolute_cfg_fname(cfgfile, sizeof(cfgfile), is_game);
 	f = fopen(cfgfile, "w");
 	if (f == NULL) {
 		printf("menu_write_config: failed to open: %s\n", cfgfile);
@@ -1861,7 +1869,7 @@ static int menu_load_config(int is_game)
 	char *cfg;
 	FILE *f;
 
-	make_cfg_fname(cfgfile, sizeof(cfgfile), is_game);
+	make_absolute_cfg_fname(cfgfile, sizeof(cfgfile), is_game);
 	f = fopen(cfgfile, "r");
 	if (f == NULL) {
 		printf("menu_load_config: failed to open: %s\n", cfgfile);

@@ -133,15 +133,25 @@ void handle_sigusr1(int sig)
     mQuickSaveAndPoweroff = 1;
 }
 
-static void make_path(char *buf, size_t size, const char *dir, const char *fname)
+static void make_relative_path(char *buf, size_t size, const char *dir, const char *fname)
 {
 	if (fname)
 		snprintf(buf, size, ".%s%s", dir, fname);
 	else
 		snprintf(buf, size, ".%s", dir);
 }
-#define MAKE_PATH(buf, dir, fname) \
-	make_path(buf, sizeof(buf), dir, fname)
+#define MAKE_RELATIVE_PATH(buf, dir, fname) \
+	make_relative_path(buf, sizeof(buf), dir, fname)
+
+static void make_absolute_path(char *buf, size_t size, const char *dir, const char *fname)
+{
+	if (fname)
+		snprintf(buf, size, "%s%s", dir, fname);
+	else
+		snprintf(buf, size, "%s", dir);
+}
+#define MAKE_ABSOLUTE_PATH(buf, dir, fname) \
+	make_absolute_path(buf, sizeof(buf), dir, fname)
 
 static int get_gameid_filename(char *buf, int size, const char *fmt, int i) {
 	char trimlabel[33];
@@ -183,8 +193,8 @@ static void set_default_paths(void)
 {
 #ifndef NO_FRONTEND
 	snprintf(Config.PatchesDir, sizeof(Config.PatchesDir), "." PATCHES_DIR);
-	MAKE_PATH(Config.Mcd1, MEMCARD_DIR, "card1.mcd");
-	MAKE_PATH(Config.Mcd2, MEMCARD_DIR, "card2.mcd");
+	MAKE_ABSOLUTE_PATH(Config.Mcd1, MEMCARD_DIR, "card1.mcd");
+	MAKE_ABSOLUTE_PATH(Config.Mcd2, MEMCARD_DIR, "card2.mcd");
 	strcpy(Config.BiosDir, "/mnt/PS1/bios");
 #endif
 
@@ -673,7 +683,7 @@ void emu_core_ask_exit(void)
 static void create_profile_dir(const char *directory) {
 	char path[MAXPATHLEN];
 
-	MAKE_PATH(path, directory, NULL);
+	MAKE_ABSOLUTE_PATH(path, directory, NULL);
 	mkdir(path, S_IRWXU | S_IRWXG);
 }
 
@@ -701,7 +711,7 @@ static void check_memcards(void)
 	int i;
 
 	for (i = 1; i <= 9; i++) {
-		snprintf(buf, sizeof(buf), ".%scard%d.mcd", MEMCARD_DIR, i);
+		snprintf(buf, sizeof(buf), "%scard%d.mcd", MEMCARD_DIR, i);
 
 		f = fopen(buf, "rb");
 		if (f == NULL) {
@@ -1188,7 +1198,7 @@ static int _OpenPlugins(void) {
 		char path[MAXPATHLEN];
 		char dotdir[MAXPATHLEN];
 
-		MAKE_PATH(dotdir, "/.pcsx/plugins/", NULL);
+		MAKE_ABSOLUTE_PATH(dotdir, "/root/.pcsx/plugins/", NULL);
 
 		strcpy(info.EmuName, "PCSX");
 		strncpy(info.CdromID, CdromId, 9);
