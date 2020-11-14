@@ -424,7 +424,7 @@ if [ "$need_sdl" = "yes" ]; then
   which sdl-config > /dev/null || \
     fail "sdl-config is missing; please install libsdl (libsdl1.2-dev)"
   CFLAGS="$CFLAGS `sdl-config --cflags`"
-  MAIN_LDLIBS="`sdl-config --libs` $MAIN_LDLIBS"
+  MAIN_LDLIBS="`sdl-config --libs` -lSDL_ttf -lSDL_image $MAIN_LDLIBS"
   check_sdl || fail "please install libsdl (libsdl1.2-dev)"
 fi
 

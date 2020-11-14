@@ -3,6 +3,12 @@ void menu_prepare_emu(void);
 void menu_loop(void);
 void menu_finish(void);
 
+void init_menu_SDL();
+void deinit_menu_SDL();
+void init_menu_zones();
+void run_menu_loop();
+void init_menu_system_values();
+
 void menu_notify_mode_change(int w, int h, int bpp);
 
 enum g_opts_opts {
@@ -28,6 +34,43 @@ enum g_soft_filter_opts {
 	SOFT_FILTER_EAGLE2X,
 };
 
+typedef enum{
+    MENU_TYPE_VOLUME,
+    MENU_TYPE_BRIGHTNESS,
+    MENU_TYPE_SAVE,
+    MENU_TYPE_LOAD,
+    MENU_TYPE_ASPECT_RATIO,
+    MENU_TYPE_EXIT,
+    MENU_TYPE_POWERDOWN,
+    NB_MENU_TYPES,
+} ENUM_MENU_TYPE;
+
+
+///------ Definition of the different aspect ratios
+#define ASPECT_RATIOS \
+    X(ASPECT_RATIOS_TYPE_MANUAL, "MANUAL ZOOM") \
+    X(ASPECT_RATIOS_TYPE_STRECHED, "STRECHED") \
+    X(ASPECT_RATIOS_TYPE_CROPPED, "CROPPED") \
+    X(ASPECT_RATIOS_TYPE_SCALED, "SCALED") \
+    X(NB_ASPECT_RATIOS_TYPES, "")
+
+////------ Enumeration of the different aspect ratios ------
+#undef X
+#define X(a, b) a,
+typedef enum {ASPECT_RATIOS} ENUM_ASPECT_RATIOS_TYPES;
+
+////------ Defines to be shared -------
+#define STEP_CHANGE_VOLUME          10
+#define STEP_CHANGE_BRIGHTNESS      10
+
+////------ Menu commands -------
+#define SHELL_CMD_VOLUME_GET        "/root/shell_cmds/volume_get.sh"
+#define SHELL_CMD_VOLUME_SET        "/root/shell_cmds/volume_set.sh"
+#define SHELL_CMD_BRIGHTNESS_GET    "/root/shell_cmds/brightness_get.sh"
+#define SHELL_CMD_BRIGHTNESS_SET    "/root/shell_cmds/brightness_set.sh"
+#define SHELL_CMD_POWERDOWN         "shutdown -h now"
+
+////------ Global variables -------
 extern int g_opts, g_scaler, g_gamma;
 extern int scanlines, scanline_level;
 extern int soft_scaling, analog_deadzone;
@@ -35,3 +78,11 @@ extern int soft_filter;
 
 extern int g_menuscreen_w;
 extern int g_menuscreen_h;
+
+extern int volume_percentage;
+extern int brightness_percentage;
+
+extern const char *aspect_ratio_name[];
+extern int aspect_ratio;
+extern int aspect_ratio_factor_percent;
+extern int aspect_ratio_factor_step;

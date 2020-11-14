@@ -38,6 +38,8 @@ static void toggle_fast_forward(int force_off);
 static void check_profile(void);
 static void check_memcards(void);
 #endif
+
+#define BOOT_MSG " "
 #ifndef BOOT_MSG
 #define BOOT_MSG "Booting up..."
 #endif
@@ -48,9 +50,11 @@ void StopDebugger();
 
 int ready_to_go, g_emu_want_quit, g_emu_resetting;
 unsigned long gpuDisp;
+int need_screen_cleared;
 char cfgfile_basename[MAXPATHLEN];
 int state_slot;
 enum sched_action emu_action, emu_action_old;
+enum sched_action emu_action_future = SACTION_NONE;
 char hud_msg[64];
 int hud_new_msg;
 
@@ -84,7 +88,7 @@ static int get_gameid_filename(char *buf, int size, const char *fmt, int i) {
 void set_cd_image(const char *fname)
 {
 	const char *ext = NULL;
-	
+
 	if (fname != NULL)
 		ext = strrchr(fname, '.');
 
@@ -159,22 +163,32 @@ void emu_set_default_config(void)
 void do_emu_action(void)
 {
 	int ret;
-
+	char shell_cmd[100];
+	FILE *fp;
 	emu_action_old = emu_action;
 
 	switch (emu_action) {
 	case SACTION_LOAD_STATE:
+		snprintf(hud_msg, sizeof(hud_msg), "LOADING FROM SLOT %d...", state_slot+1);
 		ret = emu_load_state(state_slot);
-		snprintf(hud_msg, sizeof(hud_msg), ret == 0 ? "LOADED" : "FAIL!");
+		snprintf(hud_msg, sizeof(hud_msg), "%s FROM SLOT %d", ret == 0 ? "LOADED" : "FAILED TO LOAD", state_slot+1);
+        hud_new_msg = 4;
+		break;
+	case SACTION_PRE_SAVE_STATE:
+		snprintf(hud_msg, sizeof(hud_msg), "SAVING IN SLOT %d...", state_slot+1);
+        hud_new_msg = 4;
+		emu_action_future = SACTION_SAVE_STATE;
 		break;
 	case SACTION_SAVE_STATE:
 		ret = emu_save_state(state_slot);
-		snprintf(hud_msg, sizeof(hud_msg), ret == 0 ? "SAVED" : "FAIL!");
+		snprintf(hud_msg, sizeof(hud_msg), "%s IN SLOT %d", ret == 0 ? "SAVED" : "FAILED TO LOAD", state_slot+1);
+        hud_new_msg = 4;
 		break;
 #ifndef NO_FRONTEND
 	case SACTION_ENTER_MENU:
 		toggle_fast_forward(1);
-		menu_loop();
+		//menu_loop();
+		run_menu_loop();
 		return;
 	case SACTION_NEXT_SSLOT:
 		state_slot++;
@@ -202,12 +216,39 @@ do_state_slot:
 		plugin_call_rearmed_cbs();
 		break;
 	case SACTION_SWITCH_DISPMODE:
-		pl_switch_dispmode();
-		plugin_call_rearmed_cbs();
-		if (GPU_open != NULL && GPU_close != NULL) {
-			GPU_close();
-			GPU_open(&gpuDisp, "PCSX", NULL);
+		aspect_ratio = (aspect_ratio+1)%NB_ASPECT_RATIOS_TYPES;
+		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
+			snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
 		}
+		else{
+			snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: %s", aspect_ratio_name[aspect_ratio]);
+		}
+		hud_new_msg = 4;
+		break;
+	case SACTION_ASPECT_RATIO_FACTOR_DECREASE:
+		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
+			aspect_ratio_factor_percent = (aspect_ratio_factor_percent>aspect_ratio_factor_step)?
+				aspect_ratio_factor_percent-aspect_ratio_factor_step:0;
+			need_screen_cleared = 1;
+		}
+		else{
+			aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
+		}
+		snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
+		hud_new_msg = 4;
+		break;
+	case SACTION_ASPECT_RATIO_FACTOR_INCREASE:
+		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
+			aspect_ratio_factor_percent = (aspect_ratio_factor_percent+aspect_ratio_factor_step<100)?
+				aspect_ratio_factor_percent+aspect_ratio_factor_step:100;
+			need_screen_cleared = 1;
+		}
+		else{
+			aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
+		}
+		aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
+		snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
+		hud_new_msg = 4;
 		break;
 	case SACTION_FAST_FORWARD:
 		toggle_fast_forward(0);
@@ -249,14 +290,58 @@ do_state_slot:
 				snprintf(hud_msg, sizeof(hud_msg), "SCREENSHOT TAKEN");
 			break;
 		}
-	case SACTION_VOLUME_UP:
 	case SACTION_VOLUME_DOWN:
-		{
-			static int volume;
-			plat_target_step_volume(&volume,
-				emu_action == SACTION_VOLUME_UP ? 1 : -1);
+		snprintf(hud_msg, sizeof(hud_msg), "VOLUME %d%%", volume_percentage);
+		hud_new_msg = 4;
+		/// ----- Compute new value -----
+		volume_percentage = (volume_percentage < STEP_CHANGE_VOLUME)?
+			0:(volume_percentage-STEP_CHANGE_VOLUME);
+		/// ----- Shell cmd ----
+		sprintf(shell_cmd, "%s %d", SHELL_CMD_VOLUME_SET, volume_percentage);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
 		}
-		return;
+		break;
+	case SACTION_VOLUME_UP:
+		snprintf(hud_msg, sizeof(hud_msg), "VOLUME %d%%", volume_percentage);
+		hud_new_msg = 4;
+		/// ----- Compute new value -----
+		volume_percentage = (volume_percentage > 100 - STEP_CHANGE_VOLUME)?
+			100:(volume_percentage+STEP_CHANGE_VOLUME);
+		/// ----- Shell cmd ----
+		sprintf(shell_cmd, "%s %d", SHELL_CMD_VOLUME_SET, volume_percentage);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		}
+		break;
+	case SACTION_BRIGHTNESS_DOWN:
+		snprintf(hud_msg, sizeof(hud_msg), "BRIGHTNESS %d%%", brightness_percentage);
+		hud_new_msg = 4;
+		/// ----- System brightness change -----
+		brightness_percentage = (brightness_percentage < STEP_CHANGE_BRIGHTNESS)?
+			0:(brightness_percentage-STEP_CHANGE_BRIGHTNESS);
+		/// ----- Shell cmd ----
+		sprintf(shell_cmd, "%s %d", SHELL_CMD_BRIGHTNESS_SET, brightness_percentage);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		}
+		break;
+	case SACTION_BRIGHTNESS_UP:
+		snprintf(hud_msg, sizeof(hud_msg), "BRIGHTNESS %d%%", brightness_percentage);
+		hud_new_msg = 4;
+		/// ----- System brightness change -----
+		brightness_percentage = (brightness_percentage > 100 - STEP_CHANGE_BRIGHTNESS)?
+			100:(brightness_percentage+STEP_CHANGE_BRIGHTNESS);
+		/// ----- Shell cmd ----
+		sprintf(shell_cmd, "%s %d", SHELL_CMD_BRIGHTNESS_SET, brightness_percentage);
+		fp = popen(shell_cmd, "r");
+		if (fp == NULL) {
+			printf("Failed to run command %s\n", shell_cmd);
+		}
+		break;
 	case SACTION_MINIMIZE:
 		if (GPU_close != NULL)
 			GPU_close();
@@ -542,6 +627,16 @@ int main(int argc, char *argv[])
 			if (i+1 >= argc) break;
 			loadst_f = argv[++i];
 		}
+		else if (!strcmp(argv[i], "-fps")) {
+			printf("Show FPS\n");
+			g_opts |= OPT_SHOWFPS;
+		}
+		else if (!strcmp(argv[i], "-frameskip")) {
+			printf("Frameskip ON\n");
+			//pl_rearmed_cbs.frameskip = -1;
+			pl_rearmed_cbs.frameskip = 1;
+			plugin_call_rearmed_cbs();
+		}
 		else if (!strcmp(argv[i], "-h") ||
 			 !strcmp(argv[i], "-help") ||
 			 !strcmp(argv[i], "--help")) {
@@ -553,6 +648,8 @@ int main(int argc, char *argv[])
 							"\t-cfg FILE\tLoads desired configuration file (default: ~/.pcsx/pcsx.cfg)\n"
 							"\t-psxout\t\tEnable PSX output\n"
 							"\t-load STATENUM\tLoads savestate STATENUM (1-5)\n"
+							"\t-fps\t\tDisplays FPS\n"
+							"\t-frameskip\tset frameskip on\n"
 							"\t-h -help\tDisplay this message\n"
 							"\tfile\t\tLoads a PSX EXE file\n"));
 			 return 0;
@@ -638,8 +735,8 @@ int main(int argc, char *argv[])
 				ret ? "failed to load" : "loaded", loadst);
 		}
 	}
-	else
-		menu_loop();
+	/*else /// We deliberately do not show the menu but exit the game if load failed
+		menu_loop();*/
 
 	pl_start_watchdog();
 
@@ -649,6 +746,10 @@ int main(int argc, char *argv[])
 		emu_action = SACTION_NONE;
 
 		psxCpu->Execute();
+		if (emu_action == SACTION_NONE && emu_action_future != SACTION_NONE){
+			emu_set_action(emu_action_future);
+			emu_action_future = SACTION_NONE;
+		}
 		if (emu_action != SACTION_NONE)
 			do_emu_action();
 	}

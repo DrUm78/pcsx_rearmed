@@ -34,7 +34,7 @@
 #include "../libpcsxcore/psxmem_map.h"
 #include "../plugins/dfinput/externals.h"
 
-#define HUD_HEIGHT 10
+#define HUD_HEIGHT 20
 
 int in_type1, in_type2;
 int in_a1[2] = { 127, 127 }, in_a2[2] = { 127, 127 };
@@ -647,6 +647,10 @@ void pl_frame_limit(void)
 	/* doing input here because the pad is polled
 	 * thousands of times per frame for some reason */
 	update_input();
+	if (emu_action == SACTION_NONE && emu_action_future != SACTION_NONE){
+		emu_set_action(emu_action_future);
+		emu_action_future = SACTION_NONE;
+	}
 
 	pcnt_end(PCNT_ALL);
 	gettimeofday(&now, 0);
