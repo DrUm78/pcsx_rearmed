@@ -1,6 +1,6 @@
 [submodule "libpicofe"]
 	path = frontend/libpicofe
-	url = git@github.com:FunKey-Project/libpicofe.git
+	url = https://github.com/FunKey-Project/libpicofe.git
 [submodule "warm"]
 	path = frontend/warm
-	url = git@github.com:FunKey-Project/warm.git
+	url = https://github.com/FunKey-Project/warm.git
