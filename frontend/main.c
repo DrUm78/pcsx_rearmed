@@ -333,7 +333,7 @@ do_state_slot:
 		aspect_ratio = (aspect_ratio+1)%NB_ASPECT_RATIOS_TYPES;
 		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
 			//snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
-			sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%\"",
+			sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%%\"",
 				SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		}
 		else{
@@ -358,7 +358,7 @@ do_state_slot:
 		}
 		/*snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
 		  hud_new_msg = 4;*/
-		sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%\"",
+		sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%%\"",
 			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
@@ -377,7 +377,7 @@ do_state_slot:
 		aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
 		/*snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
 		  hud_new_msg = 4;*/
-		sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%\"",
+		sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%%\"",
 			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
