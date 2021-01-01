@@ -66,32 +66,20 @@ char *quick_save_file = NULL;
 
 
 
-/* Send command to kill any previously scheduled shutdown */
-void kill_scheduled_shutdown()
-{
-	printf("kill_scheduled_shutdown\n");
-    /* Vars */
-    char shell_cmd_tmp[100];
-    FILE *fp;
-
-    /* Send command to kill any previously scheduled shutdown */
-    sprintf(shell_cmd_tmp, "pkill %s", SHELL_CMD_SCHEDULE_POWERDOWN);
-    fp = popen(shell_cmd_tmp, "r");
-    if (fp == NULL) {
-	printf("Failed to run command %s\n", shell_cmd_tmp);
-    }
-}
-
 /* Quick save and turn off the console */
 void quick_save_and_poweroff()
 {
-    printf("quick_save_and_poweroff\n");
-    /* Vars */
-    char shell_cmd[1000];
-    FILE *fp;
+    printf("Save Instant Play file\n");
 
-    /* Send command to kill any previously scheduled shutdown */
-	kill_scheduled_shutdown();
+    /* Send command to cancel any previously scheduled powerdown */
+    if (popen(SHELL_CMD_CANCEL_SCHED_POWERDOWN, "r") == NULL)
+    {
+        /* Countdown is still ticking, so better do nothing
+	   than start writing and get interrupted!
+	*/
+        printf("Failed to cancel scheduled shutdown\n");
+	exit(0);
+    }
 
     /* Save  */
     if(SaveState(quick_save_file)){
@@ -99,25 +87,15 @@ void quick_save_and_poweroff()
 	return;
     }
 
-    /* Write quick load file */
-    sprintf(shell_cmd, "%s SDL_NOMOUSE=1 \"%s\" -cdfile \"%s\" -loadf \"%s\"",
-	    SHELL_CMD_WRITE_QUICK_LOAD_CMD, prog_name, cdfile, quick_save_file);
-    printf("Cmd write quick load file:\n	%s\n", shell_cmd);
-    fp = popen(shell_cmd, "r");
-    if (fp == NULL) {
-	printf("Failed to run command %s\n", shell_cmd);
-    }
+    /* Perform Instant Play save and shutdown */
+    execlp(SHELL_CMD_INSTANT_PLAY, SHELL_CMD_INSTANT_PLAY,
+	   prog_name, "-cdfile", cdfile, "-loadf", quick_save_file, NULL);
 
-    /* Clean Poweroff */
-    printf("Poweroff now with cmd: %s\n", SHELL_CMD_POWERDOWN);
-    sprintf(shell_cmd, "%s", SHELL_CMD_POWERDOWN);
-    fp = popen(shell_cmd, "r");
-    if (fp == NULL) {
-	printf("Failed to run command %s\n", shell_cmd);
-    }
+    /* Should not be reached */
+    printf("Failed to perform Instant Play save and shutdown\n");
 
     /* Exit Emulator */
-    g_emu_want_quit = 1;
+    exit(0);
 }
 
 /* Handler for SIGUSR1, caused by closing the console */
