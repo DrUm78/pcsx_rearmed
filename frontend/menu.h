@@ -87,6 +87,8 @@ typedef enum {RESUME_OPTIONS} ENUM_RESUME_OPTIONS;
 #define SHELL_CMD_NOTIF                     "notif_set"
 #define SHELL_CMD_NOTIF_CLEAR               "notif_clear"
 #define SHELL_CMD_WRITE_QUICK_LOAD_CMD      "write_args_quick_load_file"
+#define SHELL_CMD_TURN_AMPLI_ON             "start_audio_amp 1"
+#define SHELL_CMD_TURN_AMPLI_OFF            "start_audio_amp 0"
 
 ////------ Global variables -------
 extern int g_opts, g_scaler, g_gamma;
