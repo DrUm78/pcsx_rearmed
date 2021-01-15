@@ -310,13 +310,13 @@ do_state_slot:
 	case SACTION_SWITCH_DISPMODE:
 		aspect_ratio = (aspect_ratio+1)%NB_ASPECT_RATIOS_TYPES;
 		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
-			//snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
-			sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%%\"",
+			//snprintf(hud_msg, sizeof(hud_msg), "    DISPLAY MODE: ZOOMED %d%%", aspect_ratio_factor_percent);
+			sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: ZOOMED %d%%%%\"",
 				SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		}
 		else{
 			//snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: %s", aspect_ratio_name[aspect_ratio]);
-			sprintf(shell_cmd, "%s %d \"     DISPLAY MODE: %s\"",
+			sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: %s\"",
 				SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_name[aspect_ratio]);
 		}
 		//hud_new_msg = 4;
@@ -334,9 +334,9 @@ do_state_slot:
 		else{
 			aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
 		}
-		/*snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
+		/*snprintf(hud_msg, sizeof(hud_msg), "    DISPLAY MODE: ZOOMED %d%%", aspect_ratio_factor_percent);
 		  hud_new_msg = 4;*/
-		sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%%\"",
+		sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: ZOOMED %d%%%%\"",
 			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
@@ -353,9 +353,9 @@ do_state_slot:
 			aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
 		}
 		aspect_ratio = ASPECT_RATIOS_TYPE_MANUAL;
-		/*snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: MANUAL ZOOM %d%%", aspect_ratio_factor_percent);
+		/*snprintf(hud_msg, sizeof(hud_msg), "    DISPLAY MODE: ZOOMED %d%%", aspect_ratio_factor_percent);
 		  hud_new_msg = 4;*/
-		sprintf(shell_cmd, "%s %d \"DISPLAY MODE: MANUAL ZOOM %d%%%%\"",
+		sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: ZOOMED %d%%%%\"",
 			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {

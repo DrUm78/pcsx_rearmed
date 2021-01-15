@@ -111,6 +111,26 @@ static void print_fps(int h, int border)
 	hud_printf(pl_vout_buf, pl_vout_w, border + 2, h - HUD_HEIGHT,
 		"%2d %4.1f", pl_rearmed_cbs.flips_per_sec,
 		pl_rearmed_cbs.vsps_cur);
+
+#define PRINT_FPS_AVG	200
+#ifdef PRINT_FPS_AVG
+	static int flip_per_sec_avg = 0;
+	static float vsps_cur_avg = 0;
+	static int fps_measurements = 0;
+
+	flip_per_sec_avg += pl_rearmed_cbs.flips_per_sec;
+	vsps_cur_avg += pl_rearmed_cbs.vsps_cur;
+	fps_measurements++;
+
+	if(fps_measurements >= PRINT_FPS_AVG){
+		printf("FPS=%2d %4.1f\n", flip_per_sec_avg/fps_measurements, vsps_cur_avg/fps_measurements);
+
+		flip_per_sec_avg = 0;
+		vsps_cur_avg = 0;
+		fps_measurements = 0;
+	}
+	
+#endif //PRINT_FPS_AVG
 }
 
 static void print_cpu_usage(int w, int h, int border)
