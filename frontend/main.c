@@ -715,19 +715,30 @@ int main(int argc, char *argv[])
 
 	emu_core_preinit();
 
+	if (argc <= 1){
+		printf("Not enough args specified, exit\n");
+		exit(EXIT_FAILURE);
+	};
+
 	// read command line options
 	for (i = 1; i < argc; i++) {
 		     if (!strcmp(argv[i], "-psxout")) psxout = 1;
 		else if (!strcmp(argv[i], "-load")) loadst = atol(argv[++i]);
 		else if (!strcmp(argv[i], "-cfg")) {
-			if (i+1 >= argc) break;
+			if (i+1 >= argc){
+				printf("Config file not specified, exit\n");
+				exit(EXIT_FAILURE);
+			};
 			strncpy(cfgfile_basename, argv[++i], MAXPATHLEN-100);	/* TODO buffer overruns */
 			SysPrintf("Using config file %s.\n", cfgfile_basename);
 		}
 		else if (!strcmp(argv[i], "-cdfile")) {
 			char isofilename[MAXPATHLEN];
 
-			if (i+1 >= argc) break;
+			if (i+1 >= argc){
+				printf("cdfile arg present but cd file not specified, exit\n");
+				exit(EXIT_FAILURE);
+			};
 			strncpy(isofilename, argv[++i], MAXPATHLEN);
 			if (isofilename[0] != '/') {
 				getcwd(path, MAXPATHLEN);
