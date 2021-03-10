@@ -224,7 +224,7 @@ CFLAGS += -DNO_FRONTEND
 endif
 
 # misc
-OBJS += frontend/main.o frontend/plugin.o
+OBJS += frontend/main.o frontend/plugin.o frontend/configfile.o 
 
 
 frontend/menu.o frontend/main.o: frontend/revision.h

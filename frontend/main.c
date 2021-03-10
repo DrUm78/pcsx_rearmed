@@ -20,6 +20,7 @@
 #include "plugin_lib.h"
 #include "pcnt.h"
 #include "menu.h"
+#include "configfile.h"
 #include "plat.h"
 #include "../libpcsxcore/misc.h"
 #include "../libpcsxcore/cheat.h"
@@ -63,6 +64,10 @@ char *cdfile = NULL;
 char *cdPath = NULL;
 static char *quick_save_file_extension = "quicksave";
 char *quick_save_file = NULL;
+char *cfg_file_default = NULL;
+char *cfg_file_rom = NULL;
+static char *cfg_file_default_name = "default_config";
+static char *cfg_file_extension = "cfg";
 
 
 
@@ -324,6 +329,9 @@ do_state_slot:
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
 		}
+
+        // Save config file
+        configfile_save(cfg_file_rom);
 		break;
 	case SACTION_ASPECT_RATIO_FACTOR_DECREASE:
 		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
@@ -342,6 +350,9 @@ do_state_slot:
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
 		}
+
+        // Save config file
+        configfile_save(cfg_file_rom);
 		break;
 	case SACTION_ASPECT_RATIO_FACTOR_INCREASE:
 		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
@@ -361,6 +372,9 @@ do_state_slot:
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
 		}
+
+        // Save config file
+        configfile_save(cfg_file_rom);
 		break;
 	case SACTION_FAST_FORWARD:
 		toggle_fast_forward(0);
@@ -776,6 +790,24 @@ int main(int argc, char *argv[])
 				sprintf(quick_save_file, "%s/%s.%s",
 					cdPath, cdfile_no_ext, quick_save_file_extension);
 				printf("quick_save_file: %s\n", quick_save_file);
+				
+		        /* Set rom cfg filepath */
+		        cfg_file_rom = (char *)malloc(strlen(cdPath) + strlen(slash+1) +
+		          strlen(cfg_file_extension) + 2 + 1);
+		        sprintf(cfg_file_rom, "%s/%s.%s",
+		          cdPath, slash+1, cfg_file_extension);
+		        printf("cfg_file_rom: %s\n", cfg_file_rom);
+
+		        /* Set console cfg filepath */
+		        cfg_file_default = (char *)malloc(strlen(cdPath) + strlen(cfg_file_default_name) +
+		          strlen(cfg_file_extension) + 2 + 1);
+		        sprintf(cfg_file_default, "%s/%s.%s",
+		          cdPath, cfg_file_default_name, cfg_file_extension);
+		        printf("cfg_file_default: %s\n", cfg_file_default);
+
+		        /** Load config files */
+		        configfile_load(cfg_file_default);
+		        configfile_load(cfg_file_rom);
 
 				fclose(f);
 			}
