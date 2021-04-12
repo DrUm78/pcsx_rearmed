@@ -24,7 +24,7 @@
 #include "plugin.h"
 #include "main.h"
 #include "menu.h"
-#include "configfile.h"
+#include "configfile_fk.h"
 #include "plat.h"
 #include "revision.h"
 

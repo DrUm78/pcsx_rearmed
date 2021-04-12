@@ -24,7 +24,7 @@
 
 #include "main.h"
 #include "menu.h"
-#include "configfile.h"
+#include "configfile_fk.h"
 #include "config.h"
 #include "plugin.h"
 #include "plugin_lib.h"
