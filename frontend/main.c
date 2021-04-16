@@ -74,10 +74,12 @@ static char *cfg_file_extension = "fkcfg";
 /* Quick save and turn off the console */
 void quick_save_and_poweroff()
 {
+    FILE *fp;
     printf("Save Instant Play file\n");
 
     /* Send command to cancel any previously scheduled powerdown */
-    if (popen(SHELL_CMD_CANCEL_SCHED_POWERDOWN, "r") == NULL)
+    fp = popen(SHELL_CMD_CANCEL_SCHED_POWERDOWN, "r");
+    if (fp == NULL)
     {
         /* Countdown is still ticking, so better do nothing
 	   than start writing and get interrupted!
@@ -85,6 +87,7 @@ void quick_save_and_poweroff()
         printf("Failed to cancel scheduled shutdown\n");
 	exit(0);
     }
+    pclose(fp);
 
     /* Save  */
     if(SaveState(quick_save_file)){
@@ -252,6 +255,8 @@ void do_emu_action(void)
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 		break;
 	case SACTION_PRE_SAVE_STATE:
@@ -262,6 +267,8 @@ void do_emu_action(void)
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 
 		emu_action_future = SACTION_SAVE_STATE;
@@ -275,6 +282,8 @@ void do_emu_action(void)
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 		break;
 #ifndef NO_FRONTEND
@@ -328,6 +337,8 @@ do_state_slot:
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 
         // Save config file
@@ -349,6 +360,8 @@ do_state_slot:
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 
         // Save config file
@@ -371,6 +384,8 @@ do_state_slot:
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 
         // Save config file
@@ -429,6 +444,8 @@ do_state_slot:
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 		break;
 	case SACTION_VOLUME_UP:
@@ -442,6 +459,8 @@ do_state_slot:
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 		break;
 	case SACTION_BRIGHTNESS_DOWN:
@@ -455,6 +474,8 @@ do_state_slot:
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 		break;
 	case SACTION_BRIGHTNESS_UP:
@@ -468,6 +489,8 @@ do_state_slot:
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
+		} else {
+			pclose(fp);
 		}
 		break;
 	case SACTION_MINIMIZE:
