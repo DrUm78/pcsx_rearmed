@@ -750,7 +750,6 @@ void run_menu_loop()
     int start_scroll=0;
     uint8_t screen_refresh = 1;
     char shell_cmd[100];
-    FILE *fp;
     uint8_t menu_confirmation = 0;
     stop_menu_loop = 0;
     char fname[MAXPATHLEN];
@@ -772,10 +771,7 @@ void run_menu_loop()
             RES_HW_SCREEN_HORIZONTAL * RES_HW_SCREEN_VERTICAL * sizeof(u16));
 
     /* Stop Ampli */
-    fp = popen(SHELL_CMD_TURN_AMPLI_OFF, "r");
-    if (fp != NULL) {
-        pclose(fp);
-    }
+    system(SHELL_CMD_TURN_AMPLI_OFF);
 
     /// ------ Wait for menu UP key event ------
     while(event.type != SDL_KEYUP || event.key.keysym.sym != SDLK_q){
@@ -865,12 +861,7 @@ void run_menu_loop()
 
                             /// ----- Shell cmd ----
                             sprintf(shell_cmd, "%s %d", SHELL_CMD_VOLUME_SET, volume_percentage);
-                            fp = popen(shell_cmd, "r");
-                            if (fp == NULL) {
-                                MENU_ERROR_PRINTF("Failed to run command %s\n", shell_cmd);
-			    } else {
-			        pclose(fp);
-                            }
+                            system(shell_cmd);
 
                             /// ------ Refresh screen ------
                             screen_refresh = 1;
@@ -883,13 +874,9 @@ void run_menu_loop()
 
                             /// ----- Shell cmd ----
                             sprintf(shell_cmd, "%s %d", SHELL_CMD_BRIGHTNESS_SET, brightness_percentage);
-                            fp = popen(shell_cmd, "r");
-                            if (fp == NULL) {
-                                MENU_ERROR_PRINTF("Failed to run command %s\n", shell_cmd);
-			    } else {
-			        pclose(fp);
-                            }
-                        /// ------ Refresh screen ------
+                            system(shell_cmd);
+
+			    /// ------ Refresh screen ------
                             screen_refresh = 1;
                         }
                         else if(idx_menus[menuItem] == MENU_TYPE_SAVE){
@@ -941,12 +928,8 @@ void run_menu_loop()
 
                             /// ----- Shell cmd ----
                             sprintf(shell_cmd, "%s %d", SHELL_CMD_VOLUME_SET, volume_percentage);
-                            fp = popen(shell_cmd, "r");
-                            if (fp == NULL) {
-                                MENU_ERROR_PRINTF("Failed to run command %s\n", shell_cmd);
-			    } else {
-			        pclose(fp);
-                            }
+                            system(shell_cmd);
+
                             /// ------ Refresh screen ------
                             screen_refresh = 1;
                         }
@@ -958,12 +941,8 @@ void run_menu_loop()
 
                             /// ----- Shell cmd ----
                             sprintf(shell_cmd, "%s %d", SHELL_CMD_BRIGHTNESS_SET, brightness_percentage);
-                            fp = popen(shell_cmd, "r");
-                            if (fp == NULL) {
-                                MENU_ERROR_PRINTF("Failed to run command %s\n", shell_cmd);
-			    } else {
-			        pclose(fp);
-                            }
+                            system(shell_cmd);
+
                             /// ------ Refresh screen ------
                             screen_refresh = 1;
                         }
@@ -1026,14 +1005,7 @@ void run_menu_loop()
                                     sprintf(shell_cmd, "%s %d \"        SAVED IN SLOT %d\"",
                                         SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
                                 }
-                                fp = popen(shell_cmd, "r");
-                                if (fp == NULL) {
-                                    MENU_ERROR_PRINTF("Failed to run command %s\n", shell_cmd);
-				} else {
-				    pclose(fp);
-                                }
-
-                                stop_menu_loop = 1;
+                                system(shell_cmd);
                             }
                             else{
                                 MENU_DEBUG_PRINTF("Save game - asking confirmation\n");
@@ -1073,13 +1045,7 @@ void run_menu_loop()
                                             SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
                                     }
                                 }
-                                fp = popen(shell_cmd, "r");
-                                if (fp == NULL) {
-                                    MENU_ERROR_PRINTF("Failed to run command %s\n", shell_cmd);
-				} else {
-				    pclose(fp);
-                                }
-
+                                system(shell_cmd);
                                 stop_menu_loop = 1;
                             }
                             else{
@@ -1184,10 +1150,7 @@ void run_menu_loop()
     }
 
     /* Start Ampli */
-    fp = popen(SHELL_CMD_TURN_AMPLI_ON, "r");
-    if (fp != NULL) {
-        pclose(fp);
-    }
+    system(SHELL_CMD_TURN_AMPLI_ON);
 
     /// ------ Reset last screen ------
     if(reset_last_scren_on_exit){
@@ -1217,13 +1180,9 @@ int launch_resume_menu_loop()
     uint8_t screen_refresh = 1;
     uint8_t menu_confirmation = 0;
     int option_idx=RESUME_YES;
-    FILE *fp;
 
     /* Stop Ampli */
-    fp = popen(SHELL_CMD_TURN_AMPLI_OFF, "r");
-    if (fp != NULL) {
-        pclose(fp);
-    }
+    system(SHELL_CMD_TURN_AMPLI_OFF);
 
     /* Save prev key repeat params and set new Key repeat */
     SDL_GetKeyRepeat(&backup_key_repeat_delay, &backup_key_repeat_interval);
@@ -1391,10 +1350,7 @@ int launch_resume_menu_loop()
     }
 
     /* Start Ampli */
-    fp = popen(SHELL_CMD_TURN_AMPLI_ON, "r");
-    if (fp != NULL) {
-        pclose(fp);
-    }
+    system(SHELL_CMD_TURN_AMPLI_ON);
 
     return option_idx;
 }
@@ -3223,12 +3179,7 @@ static void menu_bios_warn(void)
     char shell_cmd[400];
     sprintf(shell_cmd, "%s 0 \"     BIOS FILES MISSING^^While many games work fine ^with fake BIOS, others (like ^MGS and FF8) require BIOS to^work. Copy the BIOS^files in PS1/bios/^^BIOS file is called^: SCPH1001.BIN^File size is always 512KB^^For more instructions:^www.funkey-project.com^^Press any button to continue^^\"",
             SHELL_CMD_NOTIF);
-    FILE *fp = popen(shell_cmd, "r");
-    if (fp == NULL) {
-        printf("In %s, Failed to run command %s\n", __func__, shell_cmd);
-    } else {
-        pclose(fp);
-    }
+    system(shell_cmd);
 
     /// ------ Wait for key press ------
     SDL_Event event;
@@ -3238,12 +3189,7 @@ static void menu_bios_warn(void)
     }
 
     /** Clear notif for BIOS */
-    fp = popen(SHELL_CMD_NOTIF_CLEAR, "r");
-    if (fp == NULL) {
-        printf("In %s, Failed to run command %s\n", __func__, SHELL_CMD_NOTIF_CLEAR);
-    } else {
-        pclose(fp);
-    }
+    system(SHELL_CMD_NOTIF_CLEAR);
 }
 
 // ------------ main menu ------------
