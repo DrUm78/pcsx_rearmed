@@ -97,7 +97,7 @@ void quick_save_and_poweroff()
 
     /* Perform Instant Play save and shutdown */
     execlp(SHELL_CMD_INSTANT_PLAY, SHELL_CMD_INSTANT_PLAY,
-	   prog_name, "-cdfile", cdfile, "-loadf", quick_save_file, NULL);
+	   "save", prog_name, "-cdfile", cdfile, "-loadf", quick_save_file, NULL);
 
     /* Should not be reached */
     printf("Failed to perform Instant Play save and shutdown\n");
