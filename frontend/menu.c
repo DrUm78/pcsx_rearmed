@@ -771,7 +771,7 @@ void run_menu_loop()
             RES_HW_SCREEN_HORIZONTAL * RES_HW_SCREEN_VERTICAL * sizeof(u16));
 
     /* Stop Ampli */
-    system(SHELL_CMD_TURN_AMPLI_OFF);
+    system(SHELL_CMD_AUDIO_AMP_OFF);
 
     /// ------ Wait for menu UP key event ------
     while(event.type != SDL_KEYUP || event.key.keysym.sym != SDLK_q){
@@ -1150,7 +1150,7 @@ void run_menu_loop()
     }
 
     /* Start Ampli */
-    system(SHELL_CMD_TURN_AMPLI_ON);
+    system(SHELL_CMD_AUDIO_AMP_ON);
 
     /// ------ Reset last screen ------
     if(reset_last_scren_on_exit){
@@ -1182,7 +1182,7 @@ int launch_resume_menu_loop()
     int option_idx=RESUME_YES;
 
     /* Stop Ampli */
-    system(SHELL_CMD_TURN_AMPLI_OFF);
+    system(SHELL_CMD_AUDIO_AMP_OFF);
 
     /* Save prev key repeat params and set new Key repeat */
     SDL_GetKeyRepeat(&backup_key_repeat_delay, &backup_key_repeat_interval);
@@ -1350,7 +1350,7 @@ int launch_resume_menu_loop()
     }
 
     /* Start Ampli */
-    system(SHELL_CMD_TURN_AMPLI_ON);
+    system(SHELL_CMD_AUDIO_AMP_ON);
 
     return option_idx;
 }
