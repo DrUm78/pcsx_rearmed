@@ -246,12 +246,12 @@ void do_emu_action(void)
 	case SACTION_LOAD_STATE:
 		//snprintf(hud_msg, sizeof(hud_msg), "LOADING FROM SLOT %d...", state_slot+1);
 		sprintf(shell_cmd, "%s %d \"    LOADING FROM SLOT %d...\"",
-			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
+			SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, state_slot+1);
 		ret = emu_load_state(state_slot);
 		//snprintf(hud_msg, sizeof(hud_msg), "%s FROM SLOT %d", ret == 0 ? "LOADED" : "FAILED TO LOAD", state_slot+1);
 		//hud_new_msg = 4;
 		sprintf(shell_cmd, "%s %d \"%s FROM SLOT %d\"",
-			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, ret == 0 ? "      LOADED" : "  FAILED TO LOAD", state_slot+1);
+			SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, ret == 0 ? "      LOADED" : "  FAILED TO LOAD", state_slot+1);
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
@@ -263,7 +263,7 @@ void do_emu_action(void)
 		/*snprintf(hud_msg, sizeof(hud_msg), "SAVING IN SLOT %d...", state_slot+1);
 		  hud_new_msg = 4;*/
 		sprintf(shell_cmd, "%s %d \"      SAVING IN SLOT %d...\"",
-			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
+			SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, state_slot+1);
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
@@ -278,7 +278,7 @@ void do_emu_action(void)
 		/*snprintf(hud_msg, sizeof(hud_msg), "%s IN SLOT %d", ret == 0 ? "SAVED" : "FAILED TO LOAD", state_slot+1);
 		  hud_new_msg = 4;*/
 		sprintf(shell_cmd, "%s %d \"%s IN SLOT %d\"",
-			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, ret == 0 ? "        SAVED" : "  FAILED TO SAVE", state_slot+1);
+			SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, ret == 0 ? "        SAVED" : "  FAILED TO SAVE", state_slot+1);
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
@@ -326,12 +326,12 @@ do_state_slot:
 		if(aspect_ratio == ASPECT_RATIOS_TYPE_MANUAL){
 			//snprintf(hud_msg, sizeof(hud_msg), "    DISPLAY MODE: ZOOMED %d%%", aspect_ratio_factor_percent);
 			sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: ZOOMED %d%%%%\"",
-				SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
+				SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		}
 		else{
 			//snprintf(hud_msg, sizeof(hud_msg), "DISPLAY MODE: %s", aspect_ratio_name[aspect_ratio]);
 			sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: %s\"",
-				SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_name[aspect_ratio]);
+				SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, aspect_ratio_name[aspect_ratio]);
 		}
 		//hud_new_msg = 4;
 		fp = popen(shell_cmd, "r");
@@ -356,7 +356,7 @@ do_state_slot:
 		/*snprintf(hud_msg, sizeof(hud_msg), "    DISPLAY MODE: ZOOMED %d%%", aspect_ratio_factor_percent);
 		  hud_new_msg = 4;*/
 		sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: ZOOMED %d%%%%\"",
-			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
+			SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);
@@ -380,7 +380,7 @@ do_state_slot:
 		/*snprintf(hud_msg, sizeof(hud_msg), "    DISPLAY MODE: ZOOMED %d%%", aspect_ratio_factor_percent);
 		  hud_new_msg = 4;*/
 		sprintf(shell_cmd, "%s %d \"    DISPLAY MODE: ZOOMED %d%%%%\"",
-			SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
+			SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, aspect_ratio_factor_percent);
 		fp = popen(shell_cmd, "r");
 		if (fp == NULL) {
 			printf("Failed to run command %s\n", shell_cmd);

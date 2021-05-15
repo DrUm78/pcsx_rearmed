@@ -999,11 +999,11 @@ void run_menu_loop()
                                 if(ret){
                                     MENU_ERROR_PRINTF("Save Failed\n");
                                     sprintf(shell_cmd, "%s %d \"          SAVE FAILED\"",
-                                        SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP);
+                                        SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP);
                                 }
                                 else{
                                     sprintf(shell_cmd, "%s %d \"        SAVED IN SLOT %d\"",
-                                        SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
+                                        SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, state_slot+1);
                                 }
                                 system(shell_cmd);
                             }
@@ -1033,16 +1033,16 @@ void run_menu_loop()
                                 if(ret){
                                     MENU_ERROR_PRINTF("Load Failed\n");
                                     sprintf(shell_cmd, "%s %d \"          LOAD FAILED\"",
-                                        SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP);
+                                        SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP);
                                 }
                                 else{
                                     if(quick_load_slot_chosen){
                                         sprintf(shell_cmd, "%s %d \"     LOADED FROM AUTO SAVE\"",
-                                            SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP);
+                                            SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP);
                                     }
                                     else{
                                         sprintf(shell_cmd, "%s %d \"      LOADED FROM SLOT %d\"",
-                                            SHELL_CMD_NOTIF, NOTIF_SECONDS_DISP, state_slot+1);
+                                            SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, state_slot+1);
                                     }
                                 }
                                 system(shell_cmd);
@@ -3178,7 +3178,7 @@ static void menu_bios_warn(void)
     /** Set notif for BIOS */
     char shell_cmd[400];
     sprintf(shell_cmd, "%s 0 \"     BIOS FILES MISSING^^While many games work fine ^with fake BIOS, others (like ^MGS and FF8) require BIOS to^work. Copy the BIOS^files in PS1/bios/^^BIOS file is called^: SCPH1001.BIN^File size is always 512KB^^For more instructions:^www.funkey-project.com^^Press any button to continue^^\"",
-            SHELL_CMD_NOTIF);
+            SHELL_CMD_NOTIF_SET);
     system(shell_cmd);
 
     /// ------ Wait for key press ------
