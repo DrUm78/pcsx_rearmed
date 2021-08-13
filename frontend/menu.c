@@ -92,7 +92,8 @@ typedef enum
 static int last_vout_w, last_vout_h, last_vout_bpp;
 static int cpu_clock, cpu_clock_st, volume_boost, frameskip;
 static char last_selected_fname[MAXPATHLEN];
-static int config_save_counter, region, in_type_sel1, in_type_sel2;
+static int config_save_counter, region;
+int in_type_sel1, in_type_sel2;
 static int psx_clock;
 static int memcard1_sel = -1, memcard2_sel = -1;
 extern int g_autostateld_opt;
@@ -396,6 +397,7 @@ static const struct {
 	CE_CONFIG_VAL(PsxOut),
 	CE_CONFIG_VAL(SpuIrq),
 	CE_CONFIG_VAL(RCntFix),
+	CE_CONFIG_VAL(NoMemCard),
 	CE_CONFIG_VAL(VSyncWA),
 	CE_CONFIG_VAL(Cpu),
 	CE_INTVAL(region),
@@ -1550,6 +1552,10 @@ static const char h_cfg_cdda[]   = "Disable CD Audio for a performance boost\n"
 				   "(proper .cue/.bin dump is needed otherwise)";
 static const char h_cfg_sio[]    = "You should not need this, breaks games";
 static const char h_cfg_spuirq[] = "Compatibility tweak; should be left off";
+
+static const char h_cfg_nomem[]  = "Allows to unlock stuff in some games\n"
+				   "(COTS etc...)";
+
 static const char h_cfg_rcnt1[]  = "Parasite Eve 2, Vandal Hearts 1/2 Fix\n"
 				   "(timing hack, breaks other games)";
 static const char h_cfg_rcnt2[]  = "InuYasha Sengoku Battle Fix\n"
@@ -1569,6 +1575,7 @@ static menu_entry e_menu_adv_options[] =
 	//mee_onoff_h   ("SIO IRQ Always Enabled", 0, Config.Sio, 1, h_cfg_sio),
 	mee_onoff_h   ("SPU IRQ Always Enabled", 0, Config.SpuIrq, 1, h_cfg_spuirq),
 	//mee_onoff_h   ("Rootcounter hack",       0, Config.RCntFix, 1, h_cfg_rcnt1),
+	mee_onoff_h   ("No memory card fix",    0, Config.NoMemCard, 1, h_cfg_nomem),
 	mee_onoff_h   ("Rootcounter hack 2",     0, Config.VSyncWA, 1, h_cfg_rcnt2),
 	mee_onoff_h   ("Disable dynarec (slow!)",0, Config.Cpu, 1, h_cfg_nodrc),
 	mee_handler_h ("[Speed hacks]",             menu_loop_speed_hacks, h_cfg_shacks),

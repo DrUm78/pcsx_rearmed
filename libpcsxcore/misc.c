@@ -26,6 +26,8 @@
 #include "mdec.h"
 #include "gpu.h"
 #include "ppf.h"
+#include "../plugins/dfsound/spu_config.h"
+#include "database.h"
 #include <zlib.h>
 
 char CdromId[10] = "";
@@ -167,6 +169,95 @@ static void fake_bios_gpu_setup(void)
 
 	for (i = 0; i < sizeof(gpu_data_def) / sizeof(gpu_data_def[0]); i++)
 		GPU_writeData(gpu_data_def[i]);
+}
+
+/* Function for automatic patching according to GameID.
+ * It's possible that some of these games have no IDs, like some japanese games i encountered.
+ * I need to check whenever this matters or not for our games.
+ * (Plus it can still be activated in the menu)
+ * Let's hope the IDs are also not shared with other games ! (Homebrew, don't screw it up)
+ * */
+static void CheckforCDROMid_applyhacks()
+{
+	extern int in_type1, in_type2;
+	extern int in_type_sel1, in_type_sel2;
+	uint32_t i;
+
+	/* Apply hack battle fix for Inuyasha - Sengoku Otogi Kassen */
+	if (strncmp(CdromId, "SLPS03503", 9) == 0)
+	{
+		Config.VSyncWA = 1;
+		return;
+	}
+	
+	/* Force DualShock mode for some games (Ape Escape, RE Dual shock edition) */
+	for(i=0;i<sizeof(DualShockOnlyGames_db);i++)
+	{
+		if (strncmp(CdromId, DualShockOnlyGames_db[i], 9) == 0)
+		{
+			in_type1 = PSE_PAD_TYPE_ANALOGPAD;
+			in_type2 = PSE_PAD_TYPE_ANALOGPAD;
+			in_type_sel1 = 1;
+			in_type_sel2 = 1;
+			break;
+		}
+	}
+	/* Force Flightstick/DualAnalog mode on games that don't support the DualShock */
+	for(i=0;i<sizeof(DualAnalogGames_db);i++)
+	{
+		if (strncmp(CdromId, DualAnalogGames_db[i], 9) == 0)
+		{
+			in_type1 = PSE_PAD_TYPE_ANALOGJOY;
+			in_type2 = PSE_PAD_TYPE_ANALOGJOY;
+			in_type_sel1 = 1;
+			in_type_sel2 = 1;
+			break;
+		}
+	}
+	
+	/* Apply Memory card hack for Codename Tenka. (The game needs one of the memory card slots to be empty) */
+	for(i=0;i<sizeof(MemorycardHack_db);i++)
+	{
+		if (strncmp(CdromId, MemorycardHack_db[i], 9) == 0)
+		{
+			/* Disable the second memory card slot for the game */
+			McdDisable[0] = 0;
+			McdDisable[1] = 1;
+		}
+	}
+	
+	/* Switch control type to Digital for games that only support it */
+	for(i=0;i<sizeof(DigitalOnly_db);i++)
+	{
+		if (strncmp(CdromId, DigitalOnly_db[i], 9) == 0)
+		{
+			in_type1 = PSE_PAD_TYPE_STANDARD;
+			in_type2 = PSE_PAD_TYPE_STANDARD;
+			in_type_sel1 = 0;
+			in_type_sel2 = 0;
+		}
+	}
+	
+	/* Apply hackfix for Parasite Eve 2, Vandal Hearts I/II */
+	for(i=0;i<sizeof(CNTfix_db);i++)
+	{
+		if (strncmp(CdromId, CNTfix_db[i], 9) == 0)
+		{
+			Config.RCntFix = 1;
+			break;
+		}
+	}
+	
+
+	/* Apply hackfix for Diablo */
+	for(i=0;i<sizeof(Dialofix_db);i++)
+	{
+		if (strncmp(CdromId, Dialofix_db[i], 9) == 0)
+		{
+			spu_config.idiablofix = 1;
+			break;
+		}
+	}
 }
 
 int LoadCdrom() {
@@ -389,6 +480,8 @@ int CheckCdrom() {
 	SysPrintf(_("CD-ROM Label: %.32s\n"), CdromLabel);
 	SysPrintf(_("CD-ROM ID: %.9s\n"), CdromId);
 	SysPrintf(_("CD-ROM EXE Name: %.255s\n"), exename);
+	
+	CheckforCDROMid_applyhacks();
 
 	BuildPPFCache();
 

@@ -146,6 +146,9 @@ OBJS += frontend/cspace_arm.o
 endif
 endif
 
+# database f
+OBJS += libpcsxcore/database.o
+
 ifeq "$(PLATFORM)" "generic"
 OBJS += frontend/libpicofe/in_sdl.o
 OBJS += frontend/libpicofe/plat_sdl.o

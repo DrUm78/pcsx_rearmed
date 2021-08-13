@@ -122,6 +122,7 @@ void emu_set_default_config(void)
 {
 	// try to set sane config on which most games work
 	Config.Xa = Config.Cdda = Config.Sio =
+	Config.NoMemCard =
 	Config.SpuIrq = Config.RCntFix = Config.VSyncWA = 0;
 	Config.PsxAuto = 1;
 

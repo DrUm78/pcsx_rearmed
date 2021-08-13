@@ -200,6 +200,7 @@ int main(int argc, char **argv)
 	spu_config.idiablofix = 0;
 	in_type1 = PSE_PAD_TYPE_STANDARD;
 	in_type2 = PSE_PAD_TYPE_STANDARD;
+	Config.NoMemCard = 0;
 
 	accelOptions.sens     = 150;
 	accelOptions.y_def	  = 500;
@@ -253,6 +254,7 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "-cdda"))		Config.Cdda = 1;
 		else if (!strcmp(argv[i], "-xa"))		Config.Xa = 1;
 		else if (!strcmp(argv[i], "-rcnt"))		Config.RCntFix = 1 ;
+		else if (!strcmp(argv[i], "-nomem"))	Config.NoMemCard = 1;
 		else if (!strcmp(argv[i], "-sio"))		Config.Sio = 1;
 		else if (!strcmp(argv[i], "-spuirq"))	Config.SpuIrq = 1;
 		else if (!strcmp(argv[i], "-vsync"))	Config.VSyncWA = 1;

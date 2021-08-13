@@ -1582,9 +1582,17 @@ void psxBios__card_info() { // ab
 	{
 	case 0x00: case 0x01: case 0x02: case 0x03:
 		ret = Config.Mcd1[0] ? 0x2 : 0x8;
+		if (McdDisable[0])
+		{
+			ret = 0x8;
+		}
 		break;
 	case 0x10: case 0x11: case 0x12: case 0x13:
 		ret = Config.Mcd2[0] ? 0x2 : 0x8;
+		if (McdDisable[1])
+		{
+			ret = 0x8;
+		}
 		break;
 	default:
 #ifdef PSXBIOS_LOG
@@ -1593,6 +1601,10 @@ void psxBios__card_info() { // ab
 		ret = 0x11;
 		break;
 	}
+	
+	// COTS password option
+	if (Config.NoMemCard)
+		ret = 0x8;
 	
 	DeliverEvent(0x11, 0x2); // 0xf4000001, 0x0004
 	DeliverEvent(0x81, ret); // 0xf4000001, 0x0004

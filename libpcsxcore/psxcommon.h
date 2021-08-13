@@ -123,6 +123,7 @@ typedef struct {
 	boolean PsxOut;
 	boolean SpuIrq;
 	boolean RCntFix;
+	boolean NoMemCard;
 	boolean UseNet;
 	boolean VSyncWA;
 	u8 Cpu; // CPU_DYNAREC or CPU_INTERPRETER
