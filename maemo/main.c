@@ -23,7 +23,7 @@
 
 extern int in_enable_vibration;
 extern int cycle_multiplier;
-extern int in_type1, in_type2;
+extern int in_type[2];
 
 accel_option accelOptions;
 int ready_to_go, g_emu_want_quit, g_emu_resetting;
@@ -198,8 +198,8 @@ int main(int argc, char **argv)
 	spu_config.iUseReverb = 1;
 	spu_config.iUseInterpolation = 1;
 	spu_config.idiablofix = 0;
-	in_type1 = PSE_PAD_TYPE_STANDARD;
-	in_type2 = PSE_PAD_TYPE_STANDARD;
+	in_type[0] = PSE_PAD_TYPE_STANDARD;
+	in_type[1] = PSE_PAD_TYPE_STANDARD;
 
 	accelOptions.sens     = 150;
 	accelOptions.y_def	  = 500;

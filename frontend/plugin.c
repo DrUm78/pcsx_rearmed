@@ -51,9 +51,9 @@ extern int  CALLBACK SPUplayCDDAchannel(short *, int);
 /* PAD */
 static long PADreadPort1(PadDataS *pad)
 {
-	pad->controllerType = in_type1;
+	pad->controllerType = in_type[0];
 	pad->buttonStatus = ~in_keystate;
-	if (in_type1 == PSE_PAD_TYPE_ANALOGPAD) {
+	if (in_type[0] == PSE_PAD_TYPE_ANALOGPAD) {
 		pad->leftJoyX = in_a1[0];
 		pad->leftJoyY = in_a1[1];
 		pad->rightJoyX = in_a2[0];
@@ -64,7 +64,7 @@ static long PADreadPort1(PadDataS *pad)
 
 static long PADreadPort2(PadDataS *pad)
 {
-	pad->controllerType = in_type2;
+	pad->controllerType = in_type[1];
 	pad->buttonStatus = ~in_keystate >> 16;
 	return 0;
 }

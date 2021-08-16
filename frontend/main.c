@@ -125,14 +125,25 @@ void emu_set_default_config(void)
 	Config.SpuIrq = Config.RCntFix = Config.VSyncWA = 0;
 	Config.PsxAuto = 1;
 
+	#ifdef THREAD_RENDERING
+	pl_rearmed_cbs.thread_rendering = 0;
+	#endif
 	pl_rearmed_cbs.gpu_neon.allow_interlace = 2; // auto
 	pl_rearmed_cbs.gpu_neon.enhancement_enable =
 	pl_rearmed_cbs.gpu_neon.enhancement_no_main = 0;
 	pl_rearmed_cbs.gpu_peops.iUseDither = 0;
 	pl_rearmed_cbs.gpu_peops.dwActFixes = 1<<7;
+	pl_rearmed_cbs.gpu_unai.ilace_force = 0;
+	pl_rearmed_cbs.gpu_unai.pixel_skip = 1;
+	pl_rearmed_cbs.gpu_unai.lighting = 1;
+	pl_rearmed_cbs.gpu_unai.fast_lighting = 1;
+	pl_rearmed_cbs.gpu_unai.blending = 1;
+	pl_rearmed_cbs.gpu_unai.dithering = 0;
+	// old gpu_unai config
 	pl_rearmed_cbs.gpu_unai.abe_hack =
 	pl_rearmed_cbs.gpu_unai.no_light =
 	pl_rearmed_cbs.gpu_unai.no_blend = 0;
+	pl_rearmed_cbs.gpu_unai.scale_hires = 0;
 	memset(&pl_rearmed_cbs.gpu_peopsgl, 0, sizeof(pl_rearmed_cbs.gpu_peopsgl));
 	pl_rearmed_cbs.gpu_peopsgl.iVRamSize = 64;
 	pl_rearmed_cbs.gpu_peopsgl.iTexGarbageCollection = 1;
@@ -152,8 +163,8 @@ void emu_set_default_config(void)
 	new_dynarec_hacks = 0;
 	cycle_multiplier = 200;
 
-	in_type1 = PSE_PAD_TYPE_STANDARD;
-	in_type2 = PSE_PAD_TYPE_STANDARD;
+	in_type[0] = PSE_PAD_TYPE_STANDARD;
+	in_type[1] = PSE_PAD_TYPE_STANDARD;
 }
 
 void do_emu_action(void)

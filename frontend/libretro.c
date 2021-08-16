@@ -54,7 +54,7 @@ extern char Mcd1Data[MCD_SIZE];
 extern char McdDisable[2];
 
 /* PCSX ReARMed core calls and stuff */
-int in_type1, in_type2;
+int in_type[2];
 int in_a1[2] = { 127, 127 }, in_a2[2] = { 127, 127 };
 int in_keystate;
 int in_enable_vibration = 1;
@@ -981,9 +981,9 @@ static void update_variables(bool in_flight)
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) || var.value)
    {
-      in_type1 = PSE_PAD_TYPE_STANDARD;
+      in_type[0] = PSE_PAD_TYPE_STANDARD;
       if (strcmp(var.value, "analog") == 0)
-         in_type1 = PSE_PAD_TYPE_ANALOGPAD;
+         in_type[0] = PSE_PAD_TYPE_ANALOGPAD;
    }
 
    var.value = NULL;
@@ -991,9 +991,9 @@ static void update_variables(bool in_flight)
 
    if (environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) || var.value)
    {
-      in_type2 = PSE_PAD_TYPE_STANDARD;
+      in_type[1] = PSE_PAD_TYPE_STANDARD;
       if (strcmp(var.value, "analog") == 0)
-         in_type2 = PSE_PAD_TYPE_ANALOGPAD;
+         in_type[1] = PSE_PAD_TYPE_ANALOGPAD;
    }
 
 #ifdef __ARM_NEON__
@@ -1122,7 +1122,7 @@ void retro_run(void)
 		if (input_state_cb(0, RETRO_DEVICE_JOYPAD, 0, i))
 			in_keystate |= retro_psx_map[i];
 
-	if (in_type1 == PSE_PAD_TYPE_ANALOGPAD)
+	if (in_type[0] == PSE_PAD_TYPE_ANALOGPAD)
 	{
 		in_a1[0] = (input_state_cb(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X) / 256) + 128;
 		in_a1[1] = (input_state_cb(0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y) / 256) + 128;
