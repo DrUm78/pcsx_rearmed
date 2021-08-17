@@ -291,6 +291,7 @@ static u32 psxBranchNoDelay(void) {
 	u32 temp;
 
 	code = (u32 *)PSXM(psxRegs.pc);
+	code = Read_ICache(psxRegs.pc);
 	psxRegs.code = ((code == NULL) ? 0 : SWAP32(*code));
 	switch (_Op_) {
 		case 0x00: // SPECIAL
@@ -420,6 +421,7 @@ static void doBranch(u32 tar) {
 		return;
 
 	code = (u32 *)PSXM(psxRegs.pc);
+	code = Read_ICache(psxRegs.pc);
 	psxRegs.code = ((code == NULL) ? 0 : SWAP32(*code));
 
 	debugI();
@@ -924,12 +926,18 @@ void intExecuteBlock() {
 static void intClear(u32 Addr, u32 Size) {
 }
 
+static void intInvalidateCache() {
+	memset(psxRegs.ICache_Addr, 0xff, sizeof(psxRegs.ICache_Addr));
+	memset(psxRegs.ICache_Code, 0xff, sizeof(psxRegs.ICache_Code));
+}
+
 static void intShutdown() {
 }
 
 // interpreter execution
 void execI() {
 	u32 *code = (u32 *)PSXM(psxRegs.pc);
+	code = Read_ICache(psxRegs.pc);
 	psxRegs.code = ((code == NULL) ? 0 : SWAP32(*code));
 
 	debugI();
@@ -948,5 +956,6 @@ R3000Acpu psxInt = {
 	intExecute,
 	intExecuteBlock,
 	intClear,
+	intInvalidateCache,
 	intShutdown
 };

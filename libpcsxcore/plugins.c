@@ -439,7 +439,8 @@ unsigned char _PADstartPoll(PadDataS *pad) {
 }
 
 unsigned char _PADpoll(unsigned char value) {
-    if (bufc > bufcount) return 0;
+	//  See cache control port comments in psxmem.cpp psxMemWrite32().
+    if (bufc > bufcount && psxRegs.writeok) return 0;
     return buf[bufc++];
 }
 

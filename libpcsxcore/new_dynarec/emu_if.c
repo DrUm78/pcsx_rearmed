@@ -399,6 +399,9 @@ static void ari64_shutdown()
 	new_dyna_pcsx_mem_shutdown();
 }
 
+static void ari64_InvalidateCache() {
+}
+
 extern void intExecute();
 extern void intExecuteT();
 extern void intExecuteBlock();
@@ -419,6 +422,7 @@ R3000Acpu psxRec = {
 	intExecuteBlockT,
 #endif
 	ari64_clear,
+	ari64_InvalidateCache,
 	ari64_shutdown
 };
 
