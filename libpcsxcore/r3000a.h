@@ -181,10 +181,15 @@ typedef struct {
     u32 code;			/* The instruction */
 	u32 cycle;
 	u32 interrupt;
+	boolean ICache_valid;
+	u8 ICache_Addr[0x1000];
+	u8 ICache_Code[0x1000];
 	struct { u32 sCycle, cycle; } intCycle[32];
 } psxRegisters;
 
 extern psxRegisters psxRegs;
+
+extern uint32_t *Read_ICache(uint32_t pc);
 
 /* new_dynarec stuff */
 extern u32 event_cycles[PSXINT_COUNT];

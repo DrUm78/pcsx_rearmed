@@ -290,7 +290,7 @@ static u32 psxBranchNoDelay(void) {
 	u32 *code;
 	u32 temp;
 
-	code = (u32 *)PSXM(psxRegs.pc);
+	code = Read_ICache(psxRegs.pc);
 	psxRegs.code = ((code == NULL) ? 0 : SWAP32(*code));
 	switch (_Op_) {
 		case 0x00: // SPECIAL
@@ -419,7 +419,7 @@ static void doBranch(u32 tar) {
 	if (psxDelayBranchTest(tar))
 		return;
 
-	code = (u32 *)PSXM(psxRegs.pc);
+	code = Read_ICache(psxRegs.pc);
 	psxRegs.code = ((code == NULL) ? 0 : SWAP32(*code));
 
 	debugI();
@@ -929,7 +929,7 @@ static void intShutdown() {
 
 // interpreter execution
 void execI() {
-	u32 *code = (u32 *)PSXM(psxRegs.pc);
+	u32 *code = Read_ICache(psxRegs.pc);
 	psxRegs.code = ((code == NULL) ? 0 : SWAP32(*code));
 
 	debugI();
