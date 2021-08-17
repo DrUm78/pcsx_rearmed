@@ -29,12 +29,21 @@ extern "C" {
 #include "psxcounters.h"
 #include "psxbios.h"
 
+/* Possible vals for Notify() func param 'note' in R3000Acpu struct below */
+enum {
+	R3000ACPU_NOTIFY_CACHE_ISOLATED,
+	R3000ACPU_NOTIFY_CACHE_UNISOLATED,
+	R3000ACPU_NOTIFY_DMA3_EXE_LOAD
+};
+
 typedef struct {
 	int  (*Init)();
 	void (*Reset)();
 	void (*Execute)();		/* executes up to a break */
 	void (*ExecuteBlock)();	/* executes up to a jump */
 	void (*Clear)(u32 Addr, u32 Size);
+	void (*InvalidateCache)();
+	void (*Notify)(int note, void *data);
 	void (*Shutdown)();
 } R3000Acpu;
 
@@ -182,9 +191,15 @@ typedef struct {
 	u32 cycle;
 	u32 interrupt;
 	struct { u32 sCycle, cycle; } intCycle[32];
+    u8 ICache_Addr[0x1000];
+    u8 ICache_Code[0x1000];
+    boolean ICache_valid;
+    int writeok;
 } psxRegisters;
 
 extern psxRegisters psxRegs;
+
+extern uint32_t *Read_ICache(uint32_t pc);
 
 /* new_dynarec stuff */
 extern u32 event_cycles[PSXINT_COUNT];

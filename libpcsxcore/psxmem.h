@@ -136,6 +136,7 @@ u32 psxMemRead32(u32 mem);
 void psxMemWrite8 (u32 mem, u8 value);
 void psxMemWrite16(u32 mem, u16 value);
 void psxMemWrite32(u32 mem, u32 value);
+void psxMemWrite32_CacheCtrlPort(u32 value);
 void *psxMemPointer(u32 mem);
 
 #ifdef __cplusplus

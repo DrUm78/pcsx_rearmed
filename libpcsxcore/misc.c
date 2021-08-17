@@ -290,6 +290,7 @@ int LoadCdromFile(const char *filename, EXE_HEADER *head) {
 	addr = head->t_addr;
 
 	psxCpu->Clear(addr, size / 4);
+	psxCpu->InvalidateCache();
 
 	while (size & ~2047) {
 		incTime();

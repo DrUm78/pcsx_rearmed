@@ -35,6 +35,14 @@
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
+/* Uncomment for debug logging to console */
+//#define PSXMEM_LOG printf
+
+#ifndef PSXMEM_LOG
+#define PSXMEM_LOG(...)
+#endif
+
+
 void *(*psxMapHook)(unsigned long addr, size_t size, int is_fixed,
 		enum psxMapTag tag);
 void (*psxUnmapHook)(void *ptr, size_t size, enum psxMapTag tag);
@@ -214,8 +222,6 @@ void psxMemShutdown() {
 	free(psxMemWLUT); psxMemWLUT = NULL;
 }
 
-static int writeok = 1;
-
 u8 psxMemRead8(u32 mem) {
 	char *p;
 	u32 t;
@@ -284,7 +290,7 @@ u32 psxMemRead32(u32 mem) {
 			return SWAPu32(*(u32 *)(p + (mem & 0xffff)));
 		} else {
 #ifdef PSXMEM_LOG
-			if (writeok) { PSXMEM_LOG("err lw %8.8lx\n", mem); }
+			if (psxRegs.writeok) { PSXMEM_LOG("err lw %8.8lx\n", mem); }
 #endif
 			return 0;
 		}
@@ -345,62 +351,116 @@ void psxMemWrite16(u32 mem, u16 value) {
 	}
 }
 
-void psxMemWrite32(u32 mem, u32 value) {
-	char *p;
-	u32 t;
-
-//	if ((mem&0x1fffff) == 0x71E18 || value == 0x48088800) SysPrintf("t2fix!!\n");
-	t = mem >> 16;
+void psxMemWrite32(u32 mem, u32 value)
+{
+	u32 t = mem >> 16;
+	u32 m = mem & 0xffff;
 	if (t == 0x1f80 || t == 0x9f80 || t == 0xbf80) {
-		if ((mem & 0xffff) < 0x400)
+		if (m < 0x400)
 			psxHu32ref(mem) = SWAPu32(value);
 		else
 			psxHwWrite32(mem, value);
 	} else {
-		p = (char *)(psxMemWLUT[t]);
+		u8 *p = (u8*)(psxMemWLUT[t]);
 		if (p != NULL) {
-			if (Config.Debug)
-				DebugCheckBP((mem & 0xffffff) | 0x80000000, W4);
-			*(u32 *)(p + (mem & 0xffff)) = SWAPu32(value);
+			*(u32*)(p + m) = SWAPu32(value);
 #ifdef PSXREC
 			psxCpu->Clear(mem, 1);
 #endif
 		} else {
 			if (mem != 0xfffe0130) {
 #ifdef PSXREC
-				if (!writeok)
-					psxCpu->Clear(mem, 1);
+				if (!psxRegs.writeok) psxCpu->Clear(mem, 1);
 #endif
-
-#ifdef PSXMEM_LOG
-				if (writeok) { PSXMEM_LOG("err sw %8.8lx\n", mem); }
-#endif
+				if (psxRegs.writeok) { PSXMEM_LOG("%s(): err sw 0x%08x\n", __func__, mem); }
 			} else {
-				int i;
-
-				switch (value) {
-					case 0x800: case 0x804:
-						if (writeok == 0) break;
-						writeok = 0;
-						memset(psxMemWLUT + 0x0000, 0, 0x80 * sizeof(void *));
-						memset(psxMemWLUT + 0x8000, 0, 0x80 * sizeof(void *));
-						memset(psxMemWLUT + 0xa000, 0, 0x80 * sizeof(void *));
-						break;
-					case 0x00: case 0x1e988:
-						if (writeok == 1) break;
-						writeok = 1;
-						for (i = 0; i < 0x80; i++) psxMemWLUT[i + 0x0000] = (void *)&psxM[(i & 0x1f) << 16];
-						memcpy(psxMemWLUT + 0x8000, psxMemWLUT, 0x80 * sizeof(void *));
-						memcpy(psxMemWLUT + 0xa000, psxMemWLUT, 0x80 * sizeof(void *));
-						break;
-					default:
-#ifdef PSXMEM_LOG
-						PSXMEM_LOG("unk %8.8lx = %x\n", mem, value);
-#endif
-						break;
-				}
+				// Write to cache control port 0xfffe0130
+				psxMemWrite32_CacheCtrlPort(value);
 			}
 		}
+	}
+}
+
+// Write to cache control port 0xfffe0130
+void psxMemWrite32_CacheCtrlPort(u32 value)
+{
+	PSXMEM_LOG("%s(): 0x%08x\n", __func__, value);
+
+#ifdef PSXREC
+	/*  Stores in PS1 code during cache isolation invalidate cachelines.
+	 * It is assumed that cache-flush routines write to the lowest 4KB of
+	 * address space for Icache, or 1KB for Dcache/scratchpad.
+	 *  Originally, stores had to check 'writeok' in psxRegs struct before
+	 * writing to RAM. To eliminate this necessity, we could simply patch the
+	 * BIOS 0x44 FlushCache() A0 jumptable entry. Unfortunately, this won't
+	 * work for some games that use less-buggy non-BIOS cache-flush routines
+	 * like '007 Tomorrow Never Dies', often provided by SN-systems, the PS1
+	 * toolchain provider.
+	 *  Instead, we backup the lowest 64KB PS1 RAM when the cache is isolated.
+	 * All stores write to RAM regardless of cache state. Thus, cache-flush
+	 * routines temporarily trash the lowest 4KB of PS1 RAM. Fortunately, they
+	 * ran in a 'critical section' with interrupts disabled, so there's little
+	 * worry of PS1 code ever reading the trashed contents.
+	 *  We point the relevant portions of psxMemRLUT[] to the 64KB backup while
+	 * cache is isolated. This is in case the dynarec needs to recompile some
+	 * code during isolation. As long as it reads code using psxMemRLUT[] ptrs,
+	 * it should never see trashed RAM contents.
+	 *
+	 * -senquack, mips dynarec team, 2017
+	 */
+
+	static u32 mem_bak[0x10000/4];
+#endif //PSXREC
+
+	switch (value)
+	{
+		case 0x800: case 0x804:
+			if (psxRegs.writeok == 0) break;
+			psxRegs.writeok = 0;
+			PSXMEM_LOG("%s(): Icache is isolated.\n", __func__);
+
+			memset(psxMemWLUT + 0x0000, 0, 0x80 * sizeof(void *));
+			memset(psxMemWLUT + 0x8000, 0, 0x80 * sizeof(void *));
+			memset(psxMemWLUT + 0xa000, 0, 0x80 * sizeof(void *));
+
+#ifdef PSXREC
+			/* Cache is now isolated, pending cache-flush sequence:
+			 *  Backup lower 64KB of PS1 RAM, adjust psxMemRLUT[].
+			 */
+			memcpy((void*)mem_bak, (void*)psxM, sizeof(mem_bak));
+			psxMemRLUT[0x0000] = psxMemRLUT[0x0020] = psxMemRLUT[0x0040] = psxMemRLUT[0x0060] = (u8 *)mem_bak;
+			psxMemRLUT[0x8000] = psxMemRLUT[0x8020] = psxMemRLUT[0x8040] = psxMemRLUT[0x8060] = (u8 *)mem_bak;
+			psxMemRLUT[0xa000] = psxMemRLUT[0xa020] = psxMemRLUT[0xa040] = psxMemRLUT[0xa060] = (u8 *)mem_bak;
+#endif
+
+			psxCpu->Notify(R3000ACPU_NOTIFY_CACHE_ISOLATED, NULL);
+			break;
+		case 0x00: case 0x1e988:
+			if (psxRegs.writeok == 1) break;
+			psxRegs.writeok = 1;
+			PSXMEM_LOG("%s(): Icache is unisolated.\n", __func__);
+
+			for (int i = 0; i < 0x80; i++)
+				psxMemWLUT[i + 0x0000] = (u8*)&psxM[(i & 0x1f) << 16];
+			memcpy(psxMemWLUT + 0x8000, psxMemWLUT, 0x80 * sizeof(void *));
+			memcpy(psxMemWLUT + 0xa000, psxMemWLUT, 0x80 * sizeof(void *));
+
+#ifdef PSXREC
+			/* Cache is now unisolated:
+			 * Restore lower 64KB RAM contents and psxMemRLUT[].
+			 */
+			memcpy((void*)psxM, (void*)mem_bak, sizeof(mem_bak));
+			psxMemRLUT[0x0000] = psxMemRLUT[0x0020] = psxMemRLUT[0x0040] = psxMemRLUT[0x0060] = (u8 *)psxM;
+			psxMemRLUT[0x8000] = psxMemRLUT[0x8020] = psxMemRLUT[0x8040] = psxMemRLUT[0x8060] = (u8 *)psxM;
+			psxMemRLUT[0xa000] = psxMemRLUT[0xa020] = psxMemRLUT[0xa040] = psxMemRLUT[0xa060] = (u8 *)psxM;
+#endif
+
+			/* Dynarecs might take this opportunity to flush their code cache */
+			psxCpu->Notify(R3000ACPU_NOTIFY_CACHE_UNISOLATED, NULL);
+			break;
+		default:
+			PSXMEM_LOG("%s(): unknown val 0x%08x\n", __func__, value);
+			break;
 	}
 }
 
