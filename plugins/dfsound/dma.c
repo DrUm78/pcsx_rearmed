@@ -27,11 +27,9 @@
 
 unsigned short CALLBACK SPUreadDMA(void)
 {
- unsigned short s = *(unsigned short *)(spu.spuMemC + spu.spuAddr);
- spu.spuAddr += 2;
- spu.spuAddr &= 0x7fffe;
-
- return s;
+	unsigned short s = (spu.spuMem[spu.spuAddr >> 1]);
+	spu.spuAddr = (spu.spuAddr + 2) & 0x7ffff; // Increment SPU address and wrap around
+	return s;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -41,16 +39,13 @@ unsigned short CALLBACK SPUreadDMA(void)
 void CALLBACK SPUreadDMAMem(unsigned short *pusPSXMem, int iSize,
  unsigned int cycles)
 {
- int i;
-
- do_samples_if_needed(cycles, 1);
-
- for(i=0;i<iSize;i++)
-  {
-   *pusPSXMem++ = *(unsigned short *)(spu.spuMemC + spu.spuAddr);
-   spu.spuAddr += 2;
-   spu.spuAddr &= 0x7fffe;
-  }
+	int i;
+	do_samples_if_needed(cycles, 1);
+	for(i=0;i<iSize;i++)
+	{
+		*pusPSXMem++ = spu.spuMem[spu.spuAddr >> 1]; // Copy 2 bytes
+		spu.spuAddr = (spu.spuAddr + 2) & 0x7ffff; // Increment SPU address and wrap around
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -67,11 +62,9 @@ void CALLBACK SPUreadDMAMem(unsigned short *pusPSXMem, int iSize,
   
 void CALLBACK SPUwriteDMA(unsigned short val)
 {
- *(unsigned short *)(spu.spuMemC + spu.spuAddr) = val;
-
- spu.spuAddr += 2;
- spu.spuAddr &= 0x7fffe;
- spu.bMemDirty = 1;
+	spu.spuMemC[spu.spuAddr >> 1] = val;
+	spu.spuAddr = (spu.spuAddr + 2) & 0x7ffff;  // Increment SPU address and wrap around
+	spu.bMemDirty = 1;
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -81,24 +74,23 @@ void CALLBACK SPUwriteDMA(unsigned short val)
 void CALLBACK SPUwriteDMAMem(unsigned short *pusPSXMem, int iSize,
  unsigned int cycles)
 {
- int i;
+	int i;
  
- do_samples_if_needed(cycles, 1);
- spu.bMemDirty = 1;
+	do_samples_if_needed(cycles, 1);
+	spu.bMemDirty = 1;
 
- if(spu.spuAddr + iSize*2 < 0x80000)
-  {
-   memcpy(spu.spuMemC + spu.spuAddr, pusPSXMem, iSize*2);
-   spu.spuAddr += iSize*2;
-   return;
-  }
+	if(spu.spuAddr + iSize*2 < 0x80000)
+	{
+		memcpy(spu.spuMemC + spu.spuAddr, pusPSXMem, iSize*2);
+		spu.spuAddr += iSize*2;
+		return;
+	}
 
- for(i=0;i<iSize;i++)
-  {
-   *(unsigned short *)(spu.spuMemC + spu.spuAddr) = *pusPSXMem++;
-   spu.spuAddr += 2;
-   spu.spuAddr &= 0x7fffe;
-  }
+	for(i=0;i<iSize;i++)
+	{
+		spu.spuMemC[spu.spuAddr >> 1] = *pusPSXMem++;  // Copy 2 bytes
+		spu.spuAddr = (spu.spuAddr + 2) & 0x7ffff;  // Increment SPU address and wrap around
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////
