@@ -132,6 +132,7 @@ void psxDma2(u32 madr, u32 bcr, u32 chcr) { // GPU
 	u32 *ptr;
 	u32 words;
 	u32 size;
+	u32 bs;
 
 	switch (chcr) {
 		case 0x01000200: // vram2mem
@@ -153,7 +154,7 @@ void psxDma2(u32 madr, u32 bcr, u32 chcr) { // GPU
 			HW_DMA2_MADR = SWAPu32(madr + words * 4);
 
 			// already 32-bit word size ((size * 4) / 4)
-			GPUDMA_INT(words / 4);
+			GPUDMA_INT(words);
 			return;
 
 		case 0x01000201: // mem2vram
@@ -167,14 +168,15 @@ void psxDma2(u32 madr, u32 bcr, u32 chcr) { // GPU
 #endif
 				break;
 			}
+			bs = (bcr & 0xffff);
 			// BA blocks * BS words (word = 32-bits)
-			words = (bcr >> 16) * (bcr & 0xffff);
+			words = (bcr >> 16) * bs;
 			GPU_writeDataMem(ptr, words);
 
 			HW_DMA2_MADR = SWAPu32(madr + words * 4);
 
-			// already 32-bit word size ((size * 4) / 4)
-			GPUDMA_INT(words / 4);
+			// X-Files video interlace. Experimental delay depending of BS.
+			GPUDMA_INT((7 * words) / bs);
 			return;
 
 		case 0x01000401: // dma chain
