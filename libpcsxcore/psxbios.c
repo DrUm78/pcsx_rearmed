@@ -18,7 +18,7 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA 02111-1307 USA.           *
  ***************************************************************************/
 
-/* Gameblabla 2018-2019 :
+/* Gameblabla 2018-2019 : 
  * Numerous changes to bios calls as well as improvements in order to conform to nocash's findings
  * for the PSX bios calls. Thanks senquack for helping out with some of the changes
  * and helping to spot issues and refine my patches.
@@ -34,6 +34,10 @@
 #include "psxhw.h"
 #include "gpu.h"
 #include <zlib.h>
+
+#if (defined(__GNUC__) && __GNUC__ >= 5) || defined(__clang__)
+#pragma GCC diagnostic ignored "-Wpointer-sign"
+#endif
 
 #undef SysPrintf
 #define SysPrintf if (Config.PsxOut) printf
@@ -696,7 +700,7 @@ void psxBios_index() { // 0x1c
 		pc0 = ra;
 		return;
 	}
-
+	
 	do {
 		if (*p == a1) {
 			v0 = a0 + (p - (char *)Ra0);
@@ -925,7 +929,7 @@ void psxBios_memcmp() { // 0x2d
 
 void psxBios_memchr() { // 0x2e
 	char *p = (char *)Ra0;
-
+	
 	if (a0 == 0 || a2 > 0x7FFFFFFF)
 	{
 		pc0 = ra;
@@ -1407,37 +1411,37 @@ void psxBios_FlushCache() { // 44
 
 void psxBios_GPU_dw() { // 0x46
 	int size;
-	s32 *ptr;
+	u32 *ptr;
 
 #ifdef PSXBIOS_LOG
 	PSXBIOS_LOG("psxBios_%s\n", biosA0n[0x46]);
 #endif
 
 	GPU_writeData(0xa0000000);
-	GPU_writeData((a1<<16)|(a0&0xffff));
-	GPU_writeData((a3<<16)|(a2&0xffff));
-	size = (a2*a3+1)/2;
-	ptr = (s32*)PSXM(Rsp[4]);  //that is correct?
-	do {
-		GPU_writeData(SWAP32(*ptr));
-		ptr++;
-	} while(--size);
+	GPU_writeData((a1<<0x10)|(a0&0xffff));
+	GPU_writeData((a3<<0x10)|(a2&0xffff));
+	size = (a2*a3)/2;
+	ptr = (u32*)PSXM(Rsp[4]);  //that is correct?
+	while(size--)
+	{
+		GPU_writeData(SWAPu32(*ptr++));
+	} 
 
 	pc0 = ra;
 }  
 
 void psxBios_mem2vram() { // 0x47
 	int size;
-
+	gpuSyncPluginSR();
 	GPU_writeData(0xa0000000);
-	GPU_writeData((a1<<16)|(a0&0xffff));
-	GPU_writeData((a3<<16)|(a2&0xffff));
-	size = (a2*a3+1)/2;
+	GPU_writeData((a1<<0x10)|(a0&0xffff));
+	GPU_writeData((a3<<0x10)|(a2&0xffff));
+	size = ((((a2 * a3) / 2) >> 4) << 16);
 	GPU_writeStatus(0x04000002);
 	psxHwWrite32(0x1f8010f4,0);
 	psxHwWrite32(0x1f8010f0,psxHwRead32(0x1f8010f0)|0x800);
 	psxHwWrite32(0x1f8010a0,Rsp[4]);//might have a buggy...
-	psxHwWrite32(0x1f8010a4,((size/16)<<16)|16);
+	psxHwWrite32(0x1f8010a4, size | 0x10);
 	psxHwWrite32(0x1f8010a8,0x01000201);
 
 	pc0 = ra;
@@ -1450,22 +1454,26 @@ void psxBios_SendGPU() { // 0x48
 }
 
 void psxBios_GPU_cw() { // 0x49
+	gpuSyncPluginSR();
 	GPU_writeData(a0);
 	pc0 = ra;
+	v0 = HW_GPU_STATUS;
 }
 
 void psxBios_GPU_cwb() { // 0x4a
-	s32 *ptr = (s32*)Ra0;
+	u32 *ptr = (u32*)Ra0;
 	int size = a1;
-	while(size--) {
-		GPU_writeData(SWAP32(*ptr));
-		ptr++;
+	gpuSyncPluginSR();
+	while(size--)
+	{
+		GPU_writeData(SWAPu32(*ptr++));
 	}
 
 	pc0 = ra;
 }
    
-void psxBios_GPU_SendPackets() { //4b:
+void psxBios_GPU_SendPackets() { //4b:	
+	gpuSyncPluginSR();
 	GPU_writeStatus(0x04000002);
 	psxHwWrite32(0x1f8010f4,0);
 	psxHwWrite32(0x1f8010f0,psxHwRead32(0x1f8010f0)|0x800);
@@ -1500,7 +1508,7 @@ void psxBios_LoadExec() { // 51
 #endif
 	s_addr = a1; s_size = a2;
 
-	a1 = 0xf000;
+	a1 = 0xf000;	
 	psxBios_Load();
 
 	header->S_addr = s_addr;
@@ -1555,7 +1563,7 @@ void psxBios_SetMem() { // 9f
 			psxHu32ref(0x1060) = SWAP32(new | 0x300);
 			psxMu32ref(0x060) = a0;
 			SysPrintf("Change effective memory : %d MBytes\n",a0);
-
+	
 		default:
 			SysPrintf("Effective memory must be 2/8 MBytes\n");
 		break;
@@ -1578,7 +1586,7 @@ void psxBios__card_info() { // ab
 	u32 ret;
 	card_active_chan = a0;
 
-	switch (card_active_chan)
+	switch (card_active_chan) 
 	{
 	case 0x00: case 0x01: case 0x02: case 0x03:
 		ret = Config.Mcd1[0] ? 0x2 : 0x8;
@@ -1593,7 +1601,7 @@ void psxBios__card_info() { // ab
 		ret = 0x11;
 		break;
 	}
-
+	
 	DeliverEvent(0x11, 0x2); // 0xf4000001, 0x0004
 	DeliverEvent(0x81, ret); // 0xf4000001, 0x0004
 	v0 = 1; pc0 = ra;
@@ -1762,11 +1770,11 @@ void psxBios_WaitEvent() { // 0a
 	if (Event[ev][spec].status == EvStUNUSED)
 	{
 		v0 = 0;
-		pc0 = ra;
+		pc0 = ra;	
 		return;
 	}
 
-	if (Event[ev][spec].status == EvStALREADY)
+	if (Event[ev][spec].status == EvStALREADY) 
 	{
 		/* Callback events (mode=EvMdINTR) do never set the ready flag (and thus WaitEvent would hang forever). */
 		if (!(Event[ev][spec].mode == EvMdINTR)) Event[ev][spec].status = EvStACTIVE;
@@ -1785,12 +1793,12 @@ void psxBios_TestEvent() { // 0b
 	ev   = a0 & 0xff;
 	spec = (a0 >> 8) & 0xff;
 
-	if (Event[ev][spec].status == EvStALREADY)
+	if (Event[ev][spec].status == EvStALREADY) 
 	{
 		if (!(Event[ev][spec].mode == EvMdINTR)) Event[ev][spec].status = EvStACTIVE;
 		v0 = 1;
-	}
-	else
+	} 
+	else 
 	{
 		v0 = 0;
 	}
@@ -2060,7 +2068,7 @@ static void buopen(int mcd, u8 *ptr, u8 *cfg)
 				int k;
 				for(i++; i<16; i++) {
 					fptr2 += 128;
-
+					
 					memset(fptr2, 0, 128);
 					fptr2[0] = j < nblk ? 0x52 : 0x53;
 					pptr[8] = i - 1;
@@ -2090,8 +2098,6 @@ static void buopen(int mcd, u8 *ptr, u8 *cfg)
  */
 
 void psxBios_open() { // 0x32
-	int i;
-	char *ptr;
 	void *pa0 = Ra0;
 
 #ifdef PSXBIOS_LOG
@@ -2160,7 +2166,7 @@ void psxBios_read() { // 0x34
 			case 3: buread(pa1, 2, a2); break;
 		}
 	}
-
+  		
 	pc0 = ra;
 }
 
@@ -2226,7 +2232,7 @@ void psxBios_puts() { // 3e/3f
 
 /* To avoid any issues with different behaviour when using the libc's own strlen instead.
  * We want to mimic the PSX's behaviour in this case for bufile. */
-static size_t strlen_internal(char* p)
+static size_t strlen_internal(char* p) 
 {
 	size_t size_of_array = 0;
 	while (*p++) size_of_array++;
@@ -2267,7 +2273,7 @@ static size_t strlen_internal(char* p)
 /*
  *	struct DIRENTRY* firstfile(char *name,struct DIRENTRY *dir);
  */
-
+ 
 void psxBios_firstfile() { // 42
 	struct DIRENTRY *dir = (struct DIRENTRY *)Ra1;
 	void *pa0 = Ra0;
@@ -2524,7 +2530,7 @@ void psxBios__new_card() { // 0x50
 
 /* According to a user, this allows Final Fantasy Tactics to save/load properly */
 void psxBios__get_error(void) // 55
-{
+{ 
 	v0 = 0;
 	pc0 = ra;
 }
@@ -2600,7 +2606,7 @@ void psxBios__card_chan() { // 0x58
 void psxBios_ChangeClearPad() { // 5b
 #ifdef PSXBIOS_LOG
 	PSXBIOS_LOG("psxBios_%s: %x\n", biosB0n[0x5b], a0);
-#endif
+#endif	
 
 	pc0 = ra;
 }
@@ -2668,11 +2674,11 @@ void psxBios_ChangeClearRCnt() { // 0a
 	pc0 = ra;
 }
 
-void psxBios_dummy() {
+void psxBios_dummy() { 
 #ifdef PSXBIOS_LOG
 	PSXBIOS_LOG("unk %x call: %x\n", pc0 & 0x1fffff, t1);
 #endif
-	pc0 = ra;
+	pc0 = ra; 
 }
 
 void (*biosA0[256])();
@@ -2683,7 +2689,7 @@ void (*biosC0[256])();
 
 void psxBiosInit() {
 	u32 base, size;
-	u32 *ptr;
+	u32 *ptr; 
 	int i;
 	uLongf len;
 
@@ -2766,7 +2772,7 @@ void psxBiosInit() {
 	biosA0[0x39] = psxBios_InitHeap;
 	//biosA0[0x3a] = psxBios__exit;
 	biosA0[0x3b] = psxBios_getchar;
-	biosA0[0x3c] = psxBios_putchar;
+	biosA0[0x3c] = psxBios_putchar;	
 	//biosA0[0x3d] = psxBios_gets;
 	//biosA0[0x40] = psxBios_sys_a0_40;
 	//biosA0[0x41] = psxBios_LoadTest;
@@ -2782,7 +2788,7 @@ void psxBiosInit() {
 	biosA0[0x4b] = psxBios_GPU_SendPackets;
 	biosA0[0x4c] = psxBios_sys_a0_4c;
 	biosA0[0x4d] = psxBios_GPU_GetGPUStatus;
-	//biosA0[0x4e] = psxBios_GPU_sync;
+	//biosA0[0x4e] = psxBios_GPU_sync;	
 	//biosA0[0x4f] = psxBios_sys_a0_4f;
 	//biosA0[0x50] = psxBios_sys_a0_50;
 	biosA0[0x51] = psxBios_LoadExec;
@@ -2834,10 +2840,10 @@ void psxBiosInit() {
 	//biosA0[0x7f] = psxBios_sys_a0_7f;
 	//biosA0[0x80] = psxBios_sys_a0_80;
 	//biosA0[0x81] = psxBios_sys_a0_81;
-	//biosA0[0x82] = psxBios_sys_a0_82;
+	//biosA0[0x82] = psxBios_sys_a0_82;		
 	//biosA0[0x83] = psxBios_sys_a0_83;
 	//biosA0[0x84] = psxBios_sys_a0_84;
-	//biosA0[0x85] = psxBios__96_CdStop;
+	//biosA0[0x85] = psxBios__96_CdStop;	
 	//biosA0[0x86] = psxBios_sys_a0_86;
 	//biosA0[0x87] = psxBios_sys_a0_87;
 	//biosA0[0x88] = psxBios_sys_a0_88;
@@ -2989,7 +2995,7 @@ void psxBiosInit() {
 	//biosC0[0x07] = psxBios_InstallExeptionHandler;
 	//biosC0[0x08] = psxBios_SysInitMemory;
 	//biosC0[0x09] = psxBios_SysInitKMem;
-	biosC0[0x0a] = psxBios_ChangeClearRCnt;
+	biosC0[0x0a] = psxBios_ChangeClearRCnt;	
 	//biosC0[0x0b] = psxBios_SystemError;
 	//biosC0[0x0c] = psxBios_InitDefInt;
 	//biosC0[0x0d] = psxBios_sys_c0_0d;
@@ -3057,7 +3063,7 @@ void psxBiosInit() {
 */
 	// opcode HLE
 	psxRu32ref(0x0000) = SWAPu32((0x3b << 26) | 4);
-	/* Whatever this does, it actually breaks CTR, even without the uninitiliazed memory patch.
+	/* Whatever this does, it actually breaks CTR, even without the uninitiliazed memory patch. 
 	Normally games shouldn't read from address 0 yet they do. See explanation below in details. */
 	//psxMu32ref(0x0000) = SWAPu32((0x3b << 26) | 0);
 	psxMu32ref(0x00a0) = SWAPu32((0x3b << 26) | 1);
@@ -3085,14 +3091,14 @@ void psxBiosInit() {
 	psxHu32ref(0x1060) = SWAPu32(0x00000b88);
 
 	hleSoftCall = FALSE;
-
+	
 	/*	Some games like R-Types, CTR, Fade to Black read from adress 0x00000000 due to uninitialized pointers.
 		See Garbage Area at Address 00000000h in Nocash PSX Specfications for more information.
 		Here are some examples of games not working with this fix in place :
 		R-type won't get past the Irem logo if not implemented.
 		Crash Team Racing will softlock after the Sony logo.
 	*/
-
+	
 	psxMu32ref(0x0000) = SWAPu32(0x00000003);
 	/*
 	But overwritten by 00000003h after soon.
@@ -3273,7 +3279,7 @@ void psxBiosException() {
 					break;
 
 				case 2: // ExitCritical - enable irq's
-					psxRegs.CP0.n.Status |= 0x404;
+					psxRegs.CP0.n.Status |= 0x404; 
 					break;
 				/* Normally this should cover SYS(00h, SYS(04h but they don't do anything relevant so... */
 				default:

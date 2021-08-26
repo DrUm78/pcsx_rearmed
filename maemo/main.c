@@ -197,7 +197,6 @@ int main(int argc, char **argv)
 	strcpy(Config.Bios, "HLE");
 	spu_config.iUseReverb = 1;
 	spu_config.iUseInterpolation = 1;
-	spu_config.idiablofix = 0;
 	in_type1 = PSE_PAD_TYPE_STANDARD;
 	in_type2 = PSE_PAD_TYPE_STANDARD;
 
@@ -251,6 +250,7 @@ int main(int argc, char **argv)
 		else if (!strcmp(argv[i], "-oldgpu"))		        strcpy(Config.Gpu, "gpu_peops.so");
 		else if (!strcmp(argv[i], "-unai"))		            strcpy(Config.Gpu, "gpu_unai.so");
 		else if (!strcmp(argv[i], "-cdda"))		Config.Cdda = 1;
+		else if (!strcmp(argv[i], "-async"))	Config.AsyncCD = 1;
 		else if (!strcmp(argv[i], "-xa"))		Config.Xa = 1;
 		else if (!strcmp(argv[i], "-rcnt"))		Config.RCntFix = 1 ;
 		else if (!strcmp(argv[i], "-sio"))		Config.Sio = 1;

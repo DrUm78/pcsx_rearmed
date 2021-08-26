@@ -36,6 +36,7 @@ static int sceBlock;
 
 #include "new_dynarec_config.h"
 #include "emu_if.h" //emulator interface
+#include "../psxhle.h" //emulator interface
 
 //#define DISASM
 //#define assem_debug printf

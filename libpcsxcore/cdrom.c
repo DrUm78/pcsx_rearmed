@@ -48,7 +48,7 @@ cdrStruct cdr;
 static unsigned char *pTransfer;
 
 /* CD-ROM magic numbers */
-#define CdlSync        0
+#define CdlSync        0  /* nocash documentation : "Uh, actually, returns error code 40h = Invalid Command...?" */
 #define CdlNop         1
 #define CdlSetloc      2
 #define CdlPlay        3
@@ -58,12 +58,12 @@ static unsigned char *pTransfer;
 #define CdlStandby     7
 #define CdlStop        8
 #define CdlPause       9
-#define CdlInit        10
+#define CdlReset        10
 #define CdlMute        11
 #define CdlDemute      12
 #define CdlSetfilter   13
 #define CdlSetmode     14
-#define CdlGetmode     15
+#define CdlGetparam     15
 #define CdlGetlocL     16
 #define CdlGetlocP     17
 #define CdlReadT       18
@@ -76,19 +76,19 @@ static unsigned char *pTransfer;
 #define CdlTest        25
 #define CdlID          26
 #define CdlReadS       27
-#define CdlReset       28
+#define CdlInit       28
 #define CdlGetQ        29
 #define CdlReadToc     30
 
 char *CmdName[0x100]= {
     "CdlSync",     "CdlNop",       "CdlSetloc",  "CdlPlay",
     "CdlForward",  "CdlBackward",  "CdlReadN",   "CdlStandby",
-    "CdlStop",     "CdlPause",     "CdlInit",    "CdlMute",
-    "CdlDemute",   "CdlSetfilter", "CdlSetmode", "CdlGetmode",
+    "CdlStop",     "CdlPause",     "CdlReset",    "CdlMute",
+    "CdlDemute",   "CdlSetfilter", "CdlSetmode", "CdlGetparam",
     "CdlGetlocL",  "CdlGetlocP",   "CdlReadT",   "CdlGetTN",
     "CdlGetTD",    "CdlSeekL",     "CdlSeekP",   "CdlSetclock",
     "CdlGetclock", "CdlTest",      "CdlID",      "CdlReadS",
-    "CdlReset",    NULL,           "CDlReadToc", NULL
+    "CdlInit",    NULL,           "CDlReadToc", NULL
 };
 
 unsigned char Test04[] = { 0 };
@@ -450,6 +450,7 @@ static void cdrPlayInterrupt_Autopause()
 		cdr.Result[0] = cdr.StatP;
 		cdr.Result[1] = cdr.subq.Track;
 		cdr.Result[2] = cdr.subq.Index;
+		
 
 		if (cdr.subq.Absolute[2] & 0x10) {
 			cdr.Result[3] = cdr.subq.Relative[0];
@@ -462,8 +463,8 @@ static void cdrPlayInterrupt_Autopause()
 			cdr.Result[5] = cdr.subq.Absolute[2];
 		}
 
-		cdr.Result[6] = 0;
-		cdr.Result[7] = 0;
+		cdr.Result[6] = 255;
+		cdr.Result[7] = 255;
 
 		// Rayman: Logo freeze (resultready + dataready)
 		cdr.ResultReady = 1;
@@ -496,6 +497,7 @@ void cdrPlayInterrupt()
 		if (cdr.SetlocPending) {
 			memcpy(cdr.SetSectorPlay, cdr.SetSector, 4);
 			cdr.SetlocPending = 0;
+			cdr.m_locationChanged = TRUE;
 		}
 		Find_CurTrack(cdr.SetSectorPlay);
 		ReadTrack(cdr.SetSectorPlay);
@@ -527,7 +529,15 @@ void cdrPlayInterrupt()
 		}
 	}
 
-	CDRMISC_INT(cdReadTime);
+	if (cdr.m_locationChanged)
+	{
+		CDRMISC_INT(cdReadTime * 30);
+		cdr.m_locationChanged = FALSE;
+	}
+	else
+	{
+		CDRMISC_INT(cdReadTime);
+	}
 
 	// update for CdlGetlocP/autopause
 	generate_subq(cdr.SetSectorPlay);
@@ -539,6 +549,7 @@ void cdrInterrupt() {
 	int start_rotating = 0;
 	int error = 0;
 	int delay;
+	unsigned int seekTime = 0;
 
 	// Reschedule IRQ
 	if (cdr.Stat) {
@@ -565,10 +576,6 @@ void cdrInterrupt() {
 	cdr.Irq = 0;
 
 	switch (Irq) {
-		case CdlSync:
-			// TOOD: sometimes/always return error?
-			break;
-
 		case CdlNop:
 			if (cdr.DriveState != DRIVESTATE_LID_OPEN)
 				cdr.StatP &= ~STATUS_SHELLOPEN;
@@ -586,8 +593,11 @@ void cdrInterrupt() {
 				cdr.Seeked = SEEK_DONE;
 			}
 			if (cdr.SetlocPending) {
+				seekTime = abs(msf2sec(cdr.SetSectorPlay) - msf2sec(cdr.SetSector)) * (cdReadTime / 200);
+				if(seekTime > 1000000) seekTime = 1000000;
 				memcpy(cdr.SetSectorPlay, cdr.SetSector, 4);
 				cdr.SetlocPending = 0;
+				cdr.m_locationChanged = TRUE;
 			}
 
 			// BIOS CD Player
@@ -715,7 +725,19 @@ void cdrInterrupt() {
 			InuYasha - Feudal Fairy Tale: slower
 			- Fixes battles
 			*/
-			AddIrqQueue(CdlPause + 0x100, cdReadTime * 3);
+			/* Gameblabla 
+			 * Tightening the timings (as taken from Mednafen) allows Worms Pinball to boot to the language screen more reliably.
+			*/
+			if (cdr.DriveState == DRIVESTATE_STOPPED || cdr.DriveState == DRIVESTATE_LID_OPEN)
+			{
+				delay = 5000;
+			}
+			else
+			{
+				delay = (1124584 + (msf2sec(cdr.SetSectorPlay) * 42596 / (75 * 60))) * ((cdr.Mode & MODE_SPEED) ? 1 : 2);
+			}
+			CDRMISC_INT(33868800 / (75 * ((cdr.Mode & MODE_SPEED) ? 2 : 1)));
+			AddIrqQueue(CdlPause + 0x100, delay);
 			cdr.Ctrl |= 0x80;
 			break;
 
@@ -725,13 +747,15 @@ void cdrInterrupt() {
 			cdr.Stat = Complete;
 			break;
 
-		case CdlInit:
-			AddIrqQueue(CdlInit + 0x100, cdReadTime * 6);
+		case CdlReset:
+			cdr.Muted = FALSE;
+			cdr.Mode = 0x20; /* This fixes This is Football 2, Pooh's Party lockups */
+			AddIrqQueue(CdlReset + 0x100, 4100000);
 			no_busy_error = 1;
 			start_rotating = 1;
 			break;
 
-		case CdlInit + 0x100:
+		case CdlReset + 0x100:
 			cdr.Stat = Complete;
 			break;
 
@@ -752,13 +776,12 @@ void cdrInterrupt() {
 			no_busy_error = 1;
 			break;
 
-		case CdlGetmode:
-			SetResultSize(6);
+		case CdlGetparam:
+			SetResultSize(5);
 			cdr.Result[1] = cdr.Mode;
-			cdr.Result[2] = cdr.File;
-			cdr.Result[3] = cdr.Channel;
-			cdr.Result[4] = 0;
-			cdr.Result[5] = 0;
+			cdr.Result[2] = 0;
+			cdr.Result[3] = cdr.File;
+			cdr.Result[4] = cdr.Channel;
 			no_busy_error = 1;
 			break;
 
@@ -776,8 +799,8 @@ void cdrInterrupt() {
 			break;
 
 		case CdlReadT: // SetSession?
-			// really long
-			AddIrqQueue(CdlReadT + 0x100, cdReadTime * 290 / 4);
+			/* The 44100 * 768 / 1000 value is taken from mednafen */
+			AddIrqQueue(CdlReadT + 0x100, (44100 * 768 / 1000));
 			start_rotating = 1;
 			break;
 
@@ -808,7 +831,9 @@ void cdrInterrupt() {
 				cdr.Result[0] = cdr.StatP;
 				cdr.Result[1] = itob(cdr.ResultTD[2]);
 				cdr.Result[2] = itob(cdr.ResultTD[1]);
-				cdr.Result[3] = itob(cdr.ResultTD[0]);
+				/* According to Nocash's documentation, the function doesn't care about ff.
+				 * This can be seen also in Mednafen's implementation. */
+				//cdr.Result[3] = itob(cdr.ResultTD[0]);
 			}
 			break;
 
@@ -881,7 +906,7 @@ void cdrInterrupt() {
 			cdr.Stat = Complete;
 			break;
 
-		case CdlReset:
+		case CdlInit:
 			// yes, it really sets STATUS_SHELLOPEN
 			cdr.StatP |= STATUS_SHELLOPEN;
 			cdr.DriveState = DRIVESTATE_RESCAN_CD;
@@ -891,8 +916,7 @@ void cdrInterrupt() {
 			break;
 
 		case CdlGetQ:
-			// TODO?
-			CDR_LOG_I("got CdlGetQ\n");
+			no_busy_error = 1;
 			break;
 
 		case CdlReadToc:
@@ -909,8 +933,11 @@ void cdrInterrupt() {
 		case CdlReadN:
 		case CdlReadS:
 			if (cdr.SetlocPending) {
+				seekTime = abs(msf2sec(cdr.SetSectorPlay) - msf2sec(cdr.SetSector)) * (cdReadTime / 200);
+				if(seekTime > 1000000) seekTime = 1000000;
 				memcpy(cdr.SetSectorPlay, cdr.SetSector, 4);
 				cdr.SetlocPending = 0;
+				cdr.m_locationChanged = TRUE;
 			}
 			Find_CurTrack(cdr.SetSectorPlay);
 
@@ -948,7 +975,7 @@ void cdrInterrupt() {
 				// - fix cutscene speech (startup)
 
 				// ??? - use more accurate seek time later
-				CDREAD_INT((cdr.Mode & 0x80) ? (cdReadTime / 2) : cdReadTime * 1);
+				CDREAD_INT(((cdr.Mode & 0x80) ? (cdReadTime / 2) : cdReadTime * 1) + seekTime);
 			} else {
 				cdr.StatP |= STATUS_READ;
 				cdr.StatP &= ~STATUS_SEEK;
@@ -959,7 +986,7 @@ void cdrInterrupt() {
 			cdr.Result[0] = cdr.StatP;
 			start_rotating = 1;
 			break;
-
+		case CdlSync:
 		default:
 			CDR_LOG_I("Invalid command: %02x\n", Irq);
 			error = ERROR_INVALIDCMD;
@@ -1127,7 +1154,13 @@ void cdrReadInterrupt() {
 
 	cdr.Readed = 0;
 
-	CDREAD_INT((cdr.Mode & MODE_SPEED) ? (cdReadTime / 2) : cdReadTime);
+	uint32_t delay = (cdr.Mode & MODE_SPEED) ? (cdReadTime / 2) : cdReadTime;
+	if (cdr.m_locationChanged) {
+		CDREAD_INT(delay * 30);
+		cdr.m_locationChanged = FALSE;
+	} else {
+		CDREAD_INT(delay);
+	}
 
 	/*
 	Croc 2: $40 - only FORM1 (*)
@@ -1232,17 +1265,29 @@ void cdrWrite1(unsigned char rt) {
 
 	switch (cdr.Cmd) {
 	case CdlSetloc:
-		for (i = 0; i < 3; i++)
-			set_loc[i] = btoi(cdr.Param[i]);
+		CDR_LOG("CDROM setloc command (%02X, %02X, %02X)\n", cdr.Param[0], cdr.Param[1], cdr.Param[2]);
 
-		i = msf2sec(cdr.SetSectorPlay);
-		i = abs(i - msf2sec(set_loc));
-		if (i > 16)
-			cdr.Seeked = SEEK_PENDING;
+		// MM must be BCD, SS must be BCD and <0x60, FF must be BCD and <0x75
+		if (((cdr.Param[0] & 0x0F) > 0x09) || (cdr.Param[0] > 0x99) || ((cdr.Param[1] & 0x0F) > 0x09) || (cdr.Param[1] >= 0x60) || ((cdr.Param[2] & 0x0F) > 0x09) || (cdr.Param[2] >= 0x75))
+		{
+			CDR_LOG("Invalid/out of range seek to %02X:%02X:%02X\n", cdr.Param[0], cdr.Param[1], cdr.Param[2]);
+		}
+		else
+		{
+			for (i = 0; i < 3; i++)
+			{
+				set_loc[i] = btoi(cdr.Param[i]);
+			}
 
-		memcpy(cdr.SetSector, set_loc, 3);
-		cdr.SetSector[3] = 0;
-		cdr.SetlocPending = 1;
+			i = msf2sec(cdr.SetSectorPlay);
+			i = abs(i - msf2sec(set_loc));
+			if (i > 16)
+				cdr.Seeked = SEEK_PENDING;
+
+			memcpy(cdr.SetSector, set_loc, 3);
+			cdr.SetSector[3] = 0;
+			cdr.SetlocPending = 1;
+		}
 		break;
 
 	case CdlReadN:
@@ -1252,8 +1297,8 @@ void cdrWrite1(unsigned char rt) {
 		StopReading();
 		break;
 
-	case CdlReset:
 	case CdlInit:
+	case CdlReset:
 		cdr.Seeked = SEEK_DONE;
 		StopCdda();
 		StopReading();
@@ -1465,7 +1510,9 @@ void cdrReset() {
 	cdr.DriveState = DRIVESTATE_STANDBY;
 	cdr.StatP = STATUS_ROTATING;
 	pTransfer = cdr.Transfer;
-
+	cdr.SetlocPending = 0;
+	cdr.m_locationChanged = FALSE;
+	
 	// BIOS player - default values
 	cdr.AttenuatorLeftToLeft = 0x80;
 	cdr.AttenuatorLeftToRight = 0x00;
@@ -1498,7 +1545,9 @@ int cdrFreeze(void *f, int Mode) {
 		pTransfer = cdr.Transfer + tmp;
 
 		// read right sub data
-		memcpy(tmpp, cdr.Prev, 3);
+		tmpp[0] = btoi(cdr.Prev[0]);
+		tmpp[1] = btoi(cdr.Prev[1]);
+		tmpp[2] = btoi(cdr.Prev[2]);
 		cdr.Prev[0]++;
 		ReadTrack(tmpp);
 

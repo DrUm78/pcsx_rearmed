@@ -4,3 +4,6 @@
 [submodule "warm"]
 	path = frontend/warm
 	url = https://github.com/FunKey-Project/warm.git
+[submodule "libchdr"]
+	path = libchdr
+	url = https://github.com/rtissera/libchdr.git
