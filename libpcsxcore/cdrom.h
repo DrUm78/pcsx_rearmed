@@ -75,6 +75,7 @@ typedef struct {
 	unsigned char Cmd;
 	unsigned char Readed;
 	unsigned char SetlocPending;
+	unsigned char CddaReportFrameNibble;
 	u32 Reading;
 
 	unsigned char ResultTN[6];

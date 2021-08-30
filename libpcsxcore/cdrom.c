@@ -446,31 +446,35 @@ static void cdrPlayInterrupt_Autopause()
 		StopCdda();
 	}
 	else if (cdr.Mode & MODE_REPORT) {
+		uint8_t frame_nibble = itob(cdr.subq.Absolute[2]) >> 4;
+		if (cdr.CddaReportFrameNibble != frame_nibble)
+		{
+			cdr.CddaReportFrameNibble = frame_nibble;
+			cdr.Result[0] = cdr.StatP;
+			cdr.Result[1] = cdr.subq.Track;
+			cdr.Result[2] = cdr.subq.Index;
 
-		cdr.Result[0] = cdr.StatP;
-		cdr.Result[1] = cdr.subq.Track;
-		cdr.Result[2] = cdr.subq.Index;
+			if (cdr.subq.Absolute[2] & 0x10) {
+				cdr.Result[3] = cdr.subq.Relative[0];
+				cdr.Result[4] = cdr.subq.Relative[1] | 0x80;
+				cdr.Result[5] = cdr.subq.Relative[2];
+			}
+			else {
+				cdr.Result[3] = cdr.subq.Absolute[0];
+				cdr.Result[4] = cdr.subq.Absolute[1];
+				cdr.Result[5] = cdr.subq.Absolute[2];
+			}
 
-		if (cdr.subq.Absolute[2] & 0x10) {
-			cdr.Result[3] = cdr.subq.Relative[0];
-			cdr.Result[4] = cdr.subq.Relative[1] | 0x80;
-			cdr.Result[5] = cdr.subq.Relative[2];
+			cdr.Result[6] = 0;
+			cdr.Result[7] = 0;
+
+			// Rayman: Logo freeze (resultready + dataready)
+			cdr.ResultReady = 1;
+			cdr.Stat = DataReady;
+
+			SetResultSize(8);
+			setIrq();
 		}
-		else {
-			cdr.Result[3] = cdr.subq.Absolute[0];
-			cdr.Result[4] = cdr.subq.Absolute[1];
-			cdr.Result[5] = cdr.subq.Absolute[2];
-		}
-
-		cdr.Result[6] = 0;
-		cdr.Result[7] = 0;
-
-		// Rayman: Logo freeze (resultready + dataready)
-		cdr.ResultReady = 1;
-		cdr.Stat = DataReady;
-
-		SetResultSize(8);
-		setIrq();
 	}
 }
 
@@ -486,6 +490,7 @@ void cdrPlayInterrupt()
 		SetResultSize(1);
 		cdr.StatP |= STATUS_ROTATING;
 		cdr.StatP &= ~STATUS_SEEK;
+		cdr.CddaReportFrameNibble = 0xFF;
 		cdr.Result[0] = cdr.StatP;
 		cdr.Seeked = SEEK_DONE;
 		if (cdr.Irq == 0) {
@@ -516,7 +521,7 @@ void cdrPlayInterrupt()
 	if (!cdr.Irq && !cdr.Stat && (cdr.Mode & (MODE_AUTOPAUSE|MODE_REPORT)))
 		cdrPlayInterrupt_Autopause();
 
-	if (!cdr.Play) return;
+	if (cdr.Muted || !cdr.Play) return;
 
 	cdr.SetSectorPlay[2]++;
 	if (cdr.SetSectorPlay[2] == 75) {
@@ -1513,6 +1518,7 @@ void cdrReset() {
 	pTransfer = cdr.Transfer;
 	cdr.SetlocPending = 0;
 	cdr.m_locationChanged = FALSE;
+	cdr.CddaReportFrameNibble = 0xFF;
 
 	// BIOS player - default values
 	cdr.AttenuatorLeftToLeft = 0x80;
