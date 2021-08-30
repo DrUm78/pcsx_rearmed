@@ -61,6 +61,7 @@ BOOL              bDoLazyUpdate=FALSE;
 uint32_t          lGPUInfoVals[16];
 static int        iFakePrimBusy=0;
 static const int  *skip_advice;
+BOOL              oddLines;
 
 ////////////////////////////////////////////////////////////////////////
 // some misc external display funcs
@@ -135,6 +136,7 @@ long CALLBACK GPUinit(void)                                // GPU INIT
  GPUIsIdle;
  GPUIsReadyForCommands;
  bDoVSyncUpdate = TRUE;
+ oddLines = FALSE;
 
  return 0;
 }
@@ -399,8 +401,8 @@ static void updateDisplayIfChanged(void)                      // UPDATE DISPLAY 
 
 void CALLBACK GPUupdateLace(void)                      // VSYNC
 {
- //if(!(dwActFixes&1))
- // lGPUstatusRet^=0x80000000;                           // odd/even bit
+	if(!(dwActFixes&1))
+		lGPUstatusRet^=0x80000000;                           // odd/even bit
 
  //pcsx-rearmed: removed, this is handled by core
  //if(!(dwActFixes&32))                                  // std fps limitation?
@@ -408,8 +410,6 @@ void CALLBACK GPUupdateLace(void)                      // VSYNC
 
  if(PSXDisplay.Interlaced)                             // interlaced mode?
   {
-   lGPUstatusRet^=0x80000000;                          // odd/even bit?
-
    if(bDoVSyncUpdate && PSXDisplay.DisplayMode.x>0 && PSXDisplay.DisplayMode.y>0)
     {
      updateDisplay();
@@ -446,6 +446,15 @@ void CALLBACK GPUupdateLace(void)                      // VSYNC
 
 uint32_t CALLBACK GPUreadStatus(void)             // READ STATUS
 {
+ if (vBlank || oddLines == FALSE) 
+  { // vblank or even lines
+   lGPUstatusRet &= ~(0x80000000);
+  } 
+ else 
+  { // Oddlines and not vblank
+   lGPUstatusRet |= 0x80000000;
+  }
+	
  if(dwActFixes&1)
   {
    static int iNumRead=0;                         // odd/even hack
@@ -915,8 +924,11 @@ STARTVRAM:
 
        gdata=GETLE32(pMem); pMem++;
 
-       PUTLE16(VRAMWrite.ImagePtr, (unsigned short)gdata); VRAMWrite.ImagePtr++;
-       if(VRAMWrite.ImagePtr>=psxVuw_eom) VRAMWrite.ImagePtr-=512*1024;
+       // Write odd pixel - Wrap from beginning to next index if going past GPU width
+       if(VRAMWrite.Width+VRAMWrite.x-VRAMWrite.RowsRemaining >= 1024) {
+         PUTLE16(VRAMWrite.ImagePtr-1024, (unsigned short)gdata); VRAMWrite.ImagePtr++;
+       } else { PUTLE16(VRAMWrite.ImagePtr, (unsigned short)gdata); VRAMWrite.ImagePtr++; }
+       if(VRAMWrite.ImagePtr>=psxVuw_eom) VRAMWrite.ImagePtr-=iGPUHeight*1024;// Check if went past framebuffer
        VRAMWrite.RowsRemaining --;
 
        if(VRAMWrite.RowsRemaining <= 0)
