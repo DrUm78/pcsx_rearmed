@@ -278,9 +278,9 @@ static void pl_vout_set_mode(int w, int h, int raw_w, int raw_h, int bpp)
 		vout_bpp = 16;
 
 	// don't use very low heights
-	if (vout_h < 192) {
-		buf_yoffset = (192 - vout_h) / 2;
-		vout_h = 192;
+	if (vout_h < 176) {
+		buf_yoffset = (176 - vout_h) / 2;
+		vout_h = 176;
 	}
 
 	pl_vout_scale_w = pl_vout_scale_h = 1;
