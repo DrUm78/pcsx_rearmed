@@ -31,6 +31,12 @@ static int branch = 0;
 static int branch2 = 0;
 static u32 branchPC;
 
+#ifdef DRC_DISABLE
+	int stop;
+#else
+	extern int stop;
+#endif
+
 // These macros are used to assemble the repassembler functions
 
 #ifdef PSXCPU_LOG
@@ -930,8 +936,7 @@ static void intReset() {
 }
 
 void intExecute() {
-	extern int stop;
-	for (;!stop;) 
+	for (;!stop;)
 		execI();
 }
 

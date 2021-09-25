@@ -189,10 +189,15 @@ extern psxRegisters psxRegs;
 extern u32 event_cycles[PSXINT_COUNT];
 extern u32 next_interupt;
 
+#ifdef DRC_DISABLE
+#define new_dyna_before_save()
+#define new_dyna_after_save()
+#define new_dyna_freeze(e, c)
+#define new_dyna_set_event(e, c)
+#else
 void new_dyna_before_save(void);
 void new_dyna_after_save(void);
 void new_dyna_freeze(void *f, int mode);
-
 #define new_dyna_set_event(e, c) { \
 	s32 c_ = c; \
 	u32 abs_ = psxRegs.cycle + c_; \
@@ -203,6 +208,7 @@ void new_dyna_freeze(void *f, int mode);
 		next_interupt = abs_; \
 	} \
 }
+#endif
 
 #if defined(__BIGENDIAN__)
 

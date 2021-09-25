@@ -27,6 +27,7 @@
 #include "gpu.h"
 #include "ppf.h"
 #include "database.h"
+#include "r3000a.h"
 #include <zlib.h>
 
 char CdromId[10] = "";

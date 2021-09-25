@@ -710,6 +710,7 @@ void pl_frame_limit(void)
 		else if (diff >= 0)
 			pl_rearmed_cbs.fskip_advice = 0;
 
+#ifndef DRC_DISABLE
 		// recompilation is not that fast and may cause frame skip on
 		// loading screens and such, resulting in flicker or glitches
 		if (new_dynarec_did_compile) {
@@ -720,6 +721,7 @@ void pl_frame_limit(void)
 		else
 			drc_active_vsyncs = 0;
 		new_dynarec_did_compile = 0;
+#endif
 	}
 
 	pcnt_start(PCNT_ALL);
