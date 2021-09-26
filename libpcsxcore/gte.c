@@ -275,6 +275,12 @@ INLINE u32 DIVIDE(u16 n, u16 d) {
 
 #ifndef FLAGLESS
 
+/*
+ * I based the modifications based upon Mednafen's code,
+ * see GTE_WriteDR for MTC2, GTE_ReadDR for MFC2, GTE_WriteCR for CTC2
+ * 
+*/
+
 static inline u32 MFC2(int reg) {
 	psxCP2Regs *regs = &psxRegs.CP2;
 	switch (reg) {
@@ -310,18 +316,42 @@ static inline u32 MFC2(int reg) {
 	return psxRegs.CP2D.r[reg];
 }
 
+/*
+ * If you change this, test against the following games :
+ * - Lego Racers : May not display characters
+ * - Motor Toon Grand Prix 2 : Disappearing objects
+ * 
+ * */
 static inline void MTC2(u32 value, int reg) {
 	psxCP2Regs *regs = &psxRegs.CP2;
 	switch (reg) {
-		case 15:
-			gteSXY0 = gteSXY1;
-			gteSXY1 = gteSXY2;
-			gteSXY2 = value;
-			gteSXYP = value;
+		case 12:
+			gteSX0 = value;
+			gteSY0 = value >> 16;
 			break;
 
+		case 13:
+			gteSX1 = value;
+			gteSY1 = value >> 16;
+			break;
+
+		case 14:
+			gteSX2 = value;
+			gteSY2 = value >> 16;
+			gteSXP = value;
+			gteSYP = value >> 16;
+			break;
+			
+		case 15:
+			gteSXP = value;
+			gteSYP = value >> 16;
+		
+			gteSXY0 = gteSXY1;
+			gteSXY1 = gteSXY2;
+			gteSXY2 = gteSXYP;
+			break;
+			
 		case 28:
-			gteIRGB = value;
 			gteIR1 = (value & 0x1f) << 7;
 			gteIR2 = (value & 0x3e0) << 2;
 			gteIR3 = (value & 0x7c00) >> 3;
@@ -347,7 +377,8 @@ static inline void MTC2(u32 value, int reg) {
 				}
 			}
 			break;
-
+	
+		case 29:
 		case 31:
 			return;
 
@@ -358,23 +389,13 @@ static inline void MTC2(u32 value, int reg) {
 
 static inline void CTC2(u32 value, int reg) {
 	switch (reg) {
-		case 4:
-		case 12:
-		case 20:
-		case 26:
-		case 27:
-		case 29:
-		case 30:
-			value = (s32)(s16)value;
-			break;
-
 		case 31:
-			value = value & 0x7ffff000;
-			if (value & 0x7f87e000) value |= 0x80000000;
+			psxRegs.CP2C.r[reg] = (value & 0x7ffff000) | ((value & 0x7f87e000) ? (1 << 31) : 0);
 			break;
+		default:
+			psxRegs.CP2C.r[reg] = value;
+		break;
 	}
-
-	psxRegs.CP2C.r[reg] = value;
 }
 
 void gteMFC2() {
