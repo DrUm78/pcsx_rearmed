@@ -50,6 +50,8 @@ GPUgetScreenPic       GPU_getScreenPic;
 GPUshowScreenPic      GPU_showScreenPic;
 GPUclearDynarec       GPU_clearDynarec;
 GPUvBlank             GPU_vBlank;
+GPUsetPatchFlag       GPU_setPatchFlag;
+GPUboStatus           GPU_boStatus;
 
 CDRinit               CDR_init;
 CDRshutdown           CDR_shutdown;
@@ -91,6 +93,8 @@ SPUregisterCallback   SPU_registerCallback;
 SPUregisterScheduleCb SPU_registerScheduleCb;
 SPUasync              SPU_async;
 SPUplayCDDAchannel    SPU_playCDDAchannel;
+SPUfadein             SPU_fadein;
+SPUenableRvbConfig    SPU_enableRvbConfig;
 
 PADconfigure          PAD1_configure;
 PADabout              PAD1_about;
@@ -242,9 +246,11 @@ static int LoadGPUplugin(const char *GPUdll) {
 	LoadGpuSym0(showScreenPic, "GPUshowScreenPic");
 	LoadGpuSym0(clearDynarec, "GPUclearDynarec");
     LoadGpuSym0(vBlank, "GPUvBlank");
+	LoadGpuSym1(setPatchFlag, "GPUsetPatchFlag");
 	LoadGpuSym0(configure, "GPUconfigure");
 	LoadGpuSym0(test, "GPUtest");
 	LoadGpuSym0(about, "GPUabout");
+	LoadGpuSym1(boStatus, "GPUboStatus");
 
 	return 0;
 }
@@ -361,6 +367,8 @@ static int LoadSPUplugin(const char *SPUdll) {
 	LoadSpuSym0(registerScheduleCb, "SPUregisterScheduleCb");
 	LoadSpuSymN(async, "SPUasync");
 	LoadSpuSymN(playCDDAchannel, "SPUplayCDDAchannel");
+	LoadSpuSym1(fadein, "SPUfadein");
+	LoadSpuSym1(enableRvbConfig, "SPUenableRvbConfig");
 
 	return 0;
 }

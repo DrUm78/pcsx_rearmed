@@ -88,6 +88,7 @@ static void irq_test(void)
 		psxException(0x400, 0);
 		pending_exception = 1;
 	}
+	emu_sync_state();
 }
 
 void gen_interupt()
@@ -147,7 +148,7 @@ static void new_dyna_restore(void)
 	new_dyna_pcsx_mem_load_state();
 }
 
-void new_dyna_freeze(void *f, int mode)
+int new_dyna_freeze(void *f, int mode)
 {
 	const char header_save[8] = "ariblks";
 	uint32_t addrs[1024 * 4];
@@ -155,10 +156,29 @@ void new_dyna_freeze(void *f, int mode)
 	int bytes;
 	char header[8];
 
-	if (mode != 0) { // save
+	if (mode == 2) { // save buffer or get max buffer size
+		if(f) {
+			size = new_dynarec_save_blocks(addrs, sizeof(addrs));
+
+			memcpy(f, header_save, sizeof(header_save));
+			f = (void *)((char *)f + sizeof(header_save));
+
+			memcpy(f, &size, sizeof(size));
+			f = (void *)((char *)f + sizeof(size));
+
+			memcpy(f, addrs, size);
+			f = (void *)((char *)f + size);
+		  
+		} else {
+			size = new_dynarec_save_blocks((void *)0, sizeof(addrs)); // get max size
+		}
+		size += (sizeof(header_save) + sizeof(size));
+		return size;
+		
+	} else if (mode != 0) { // save
 		size = new_dynarec_save_blocks(addrs, sizeof(addrs));
 		if (size == 0)
-			return;
+			return 0;
 
 		SaveFuncs.write(f, header_save, sizeof(header_save));
 		SaveFuncs.write(f, &size, sizeof(size));
@@ -171,11 +191,11 @@ void new_dyna_freeze(void *f, int mode)
 		if (bytes != sizeof(header) || strcmp(header, header_save)) {
 			if (bytes > 0)
 				SaveFuncs.seek(f, -bytes, SEEK_CUR);
-			return;
+			return 0;
 		}
 		SaveFuncs.read(f, &size, sizeof(size));
 		if (size <= 0)
-			return;
+			return 0;
 		if (size > sizeof(addrs)) {
 			bytes = size - sizeof(addrs);
 			SaveFuncs.seek(f, bytes, SEEK_CUR);
@@ -183,12 +203,39 @@ void new_dyna_freeze(void *f, int mode)
 		}
 		bytes = SaveFuncs.read(f, addrs, size);
 		if (bytes != size)
-			return;
+			return 0;
 
 		new_dynarec_load_blocks(addrs, size);
 	}
-
+	
 	//printf("drc: %d block info entries %s\n", size/8, mode ? "saved" : "loaded");
+	return 0;
+}
+
+void new_dyna_freeze_data(unsigned char** buff_out, int* size_out)
+{
+	const char header_save[8] = "ariblks";
+	uint32_t addrs[1024 * 4];
+	int32_t size = 0;
+
+	if (size_out == NULL) return;
+
+	size = new_dynarec_save_blocks(addrs, sizeof(addrs));
+	if (size == 0) {
+		printf("new_dyna_freeze  new_dynarec_save_blocks size is 0\n");
+		*size_out = 0;
+		return;
+	}
+
+	unsigned char * p = (unsigned char *) malloc(sizeof(header_save) + sizeof(size) + size);
+	*buff_out = p;
+	memcpy(p, (unsigned char *)header_save, sizeof(header_save));
+	p += sizeof(header_save);
+	memcpy(p, (unsigned char *)&size, sizeof(size));
+	p += sizeof(size);
+	memcpy(p, (unsigned char *)addrs, size);
+	*size_out = sizeof(header_save) + sizeof(size) + size;
+
 }
 
 /* GTE stuff */

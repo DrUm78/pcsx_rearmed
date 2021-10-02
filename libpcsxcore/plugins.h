@@ -79,9 +79,12 @@ typedef void (CALLBACK* GPUabout)(void);
 typedef void (CALLBACK* GPUmakeSnapshot)(void);
 typedef void (CALLBACK* GPUkeypressed)(int);
 typedef void (CALLBACK* GPUdisplayText)(char *);
+typedef uint32_t (CALLBACK* GPUboStatus)(void);
 typedef struct {
 	uint32_t ulFreezeVersion;
 	uint32_t ulStatus;
+	uint32_t ulEventStatus;
+	uint32_t ulEventCnt;
 	uint32_t ulControl[256];
 	unsigned char psxVRam[1024*512*2];
 } GPUFreeze_t;
@@ -90,6 +93,7 @@ typedef long (CALLBACK* GPUgetScreenPic)(unsigned char *);
 typedef long (CALLBACK* GPUshowScreenPic)(unsigned char *);
 typedef void (CALLBACK* GPUclearDynarec)(void (CALLBACK *callback)(void));
 typedef void (CALLBACK* GPUvBlank)(int, int);
+typedef void (CALLBACK* GPUsetPatchFlag)(int, int);
 
 // GPU function pointers
 extern GPUupdateLace    GPU_updateLace;
@@ -115,6 +119,8 @@ extern GPUgetScreenPic  GPU_getScreenPic;
 extern GPUshowScreenPic GPU_showScreenPic;
 extern GPUclearDynarec  GPU_clearDynarec;
 extern GPUvBlank        GPU_vBlank;
+extern GPUsetPatchFlag  GPU_setPatchFlag;
+extern GPUboStatus      GPU_boStatus;
 
 // CD-ROM Functions
 typedef long (CALLBACK* CDRinit)(void);
@@ -199,10 +205,15 @@ typedef struct {
 	unsigned char SPURam[0x80000];
 	xa_decode_t xa;
 	unsigned char *SPUInfo;
+	int volume;
+	int reverb;
 } SPUFreeze_t;
 typedef long (CALLBACK* SPUfreeze)(uint32_t, SPUFreeze_t *, uint32_t);
 typedef void (CALLBACK* SPUasync)(uint32_t, uint32_t);
 typedef int  (CALLBACK* SPUplayCDDAchannel)(short *, int);
+typedef void (CALLBACK* SPUfadein)(void);
+typedef void (CALLBACK* SPUenableRvbConfig)(int);
+
 
 // SPU function pointers
 extern SPUconfigure        SPU_configure;
@@ -225,6 +236,8 @@ extern SPUregisterCallback SPU_registerCallback;
 extern SPUregisterScheduleCb SPU_registerScheduleCb;
 extern SPUasync            SPU_async;
 extern SPUplayCDDAchannel  SPU_playCDDAchannel;
+extern SPUfadein           SPU_fadein;
+extern SPUenableRvbConfig  SPU_enableRvbConfig;
 
 // PAD Functions
 typedef long (CALLBACK* PADconfigure)(void);

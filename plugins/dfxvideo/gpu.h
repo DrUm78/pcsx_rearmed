@@ -231,6 +231,7 @@ extern uint32_t  dwCfgFixes;
 extern uint32_t  dwActFixes;
 extern int            iUseFixes;
 extern int            iUseDither;
+extern int            *scenes;
 extern BOOL           bDoVSyncUpdate;
 extern int32_t           drawX;
 extern int32_t           drawY;

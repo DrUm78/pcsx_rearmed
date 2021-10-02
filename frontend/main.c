@@ -11,6 +11,9 @@
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
+#include <pthread.h>
+#include <sys/inotify.h>
+#include <sys/stat.h>
 #ifndef _WIN32
 #include <dlfcn.h>
 #endif
@@ -37,10 +40,16 @@
 static void toggle_fast_forward(int force_off);
 static void check_profile(void);
 static void check_memcards(void);
+static int isOpenEnabled = 0;
 #endif
 #ifndef BOOT_MSG
 #define BOOT_MSG "Booting up..."
 #endif
+
+#define EVENT_SIZE  (sizeof (struct inotify_event))
+#define BUF_LEN     4096
+
+
 
 // don't include debug.h - it breaks ARM build (R1 redefined)
 void StartDebugger();
@@ -50,9 +59,45 @@ int ready_to_go, g_emu_want_quit, g_emu_resetting;
 unsigned long gpuDisp;
 char cfgfile_basename[MAXPATHLEN];
 int state_slot;
+int from_escape = 0;
+int power_off_flg = 0;
+int is_high_temperature = 0;
 enum sched_action emu_action, emu_action_old;
 char hud_msg[64];
 int hud_new_msg;
+int isUnknowCdrom;
+int holdResetEvent;
+
+int display_mode = DISPLAY_MODE_DEFAULT;
+int language = LANGUAGE_DEFAULT;
+int region = REGION_DEFAULT;
+int enter_mode = ENTER_DEFAULT;
+
+static int cpu_temp_limit = DEFAULT_TEMP_LIMIT;
+
+const char *lang_list[13] = {
+	"German",		// de_de
+	"E_UK",			// en_gb
+	"E",			// en_us
+	"Spanish_LA",		// es_419
+	"Spanish",		// es_es
+	"French_CA",		// fr_ca
+	"French",		// fr_fr
+	"Italian",		// it_it
+	"Dutch",		// nl_nl
+	"Portuguese_BR",	// pt_br
+	"Portuguese",		// pt_pt
+	"Russian",		// ru_ru
+	"J"			// ja_jp
+};
+
+char changedisc_message[128];
+char solodisc_message[128];
+char nottime_message[128];
+char ok_image[128];
+
+static pthread_t th_power_off_state = (pthread_t)0;
+static pthread_t cpu_temp_thread = (pthread_t)0;
 
 static void make_path(char *buf, size_t size, const char *dir, const char *fname)
 {
@@ -68,7 +113,12 @@ static int get_gameid_filename(char *buf, int size, const char *fmt, int i) {
 	char trimlabel[33];
 	int j;
 
-	strncpy(trimlabel, CdromLabel, 32);
+	if (CdromLabel[0] != '\0' && !(g_opts & OPT_AUTOSAVE)) {
+		strncpy(trimlabel, CdromLabel, 32);
+	}
+	else {
+		strncpy(trimlabel, CdromLabel_old, 32);
+	}
 	trimlabel[32] = 0;
 	for (j = 31; j >= 0; j--)
 		if (trimlabel[j] == ' ')
@@ -76,7 +126,12 @@ static int get_gameid_filename(char *buf, int size, const char *fmt, int i) {
 		else
 			continue;
 
-	snprintf(buf, size, fmt, trimlabel, CdromId, i);
+	if (CdromId[0] != '\0' && !(g_opts & OPT_AUTOSAVE)) {
+		snprintf(buf, size, fmt, trimlabel, CdromId, i);
+	}
+	else {
+		snprintf(buf, size, fmt, trimlabel, CdromId_old, i);
+	}
 
 	return 0;
 }
@@ -105,7 +160,7 @@ static void set_default_paths(void)
 #ifndef NO_FRONTEND
 	snprintf(Config.PatchesDir, sizeof(Config.PatchesDir), "." PATCHES_DIR);
 	MAKE_PATH(Config.Mcd1, MEMCARD_DIR, "card1.mcd");
-	MAKE_PATH(Config.Mcd2, MEMCARD_DIR, "card2.mcd");
+	MAKE_PATH(Config.Mcd2, MEMCARD_DIR, "none");
 	strcpy(Config.BiosDir, "bios");
 #endif
 
@@ -130,6 +185,10 @@ void emu_set_default_config(void)
 	pl_rearmed_cbs.gpu_neon.enhancement_no_main = 0;
 	pl_rearmed_cbs.gpu_peops.iUseDither = 0;
 	pl_rearmed_cbs.gpu_peops.dwActFixes = 1<<7;
+	pl_rearmed_cbs.gpu_peops.isToShinDen = 0;
+	pl_rearmed_cbs.gpu_peops.isBiosLogoEnd = 0;
+	pl_rearmed_cbs.gpu_peops.scenes = 0;
+	pl_rearmed_cbs.gpu_peops.regions = 0;
 	pl_rearmed_cbs.gpu_unai.abe_hack =
 	pl_rearmed_cbs.gpu_unai.no_light =
 	pl_rearmed_cbs.gpu_unai.no_blend = 0;
@@ -172,6 +231,7 @@ void do_emu_action(void)
 		break;
 #ifndef NO_FRONTEND
 	case SACTION_ENTER_MENU:
+		from_escape = 1;
 		toggle_fast_forward(1);
 		menu_loop();
 		return;
@@ -256,6 +316,10 @@ do_state_slot:
 				emu_action == SACTION_VOLUME_UP ? 1 : -1);
 		}
 		return;
+	case SACTION_SYNC_STATE:
+		emu_sync_state2();
+		time_to_sync_state = 0;
+		return;
 	case SACTION_MINIMIZE:
 		if (GPU_close != NULL)
 			GPU_close();
@@ -269,6 +333,68 @@ do_state_slot:
 		}
 		return;
 #endif
+	// add for open button
+        case SACTION_CD_CHANGE:
+                if (!isOpenEnabled) {
+                        isOpenEnabled = CheckOpenEnabled();
+                        if (!isOpenEnabled) {
+                                return;
+                        }
+                }
+                toggle_fast_forward(1);
+                swap_cd();
+                return;
+        // add for power button
+        case SACTION_POWER_OFF:
+                power_off();
+                return;
+	// add for reset button
+	case SACTION_RESET_EVENT:
+		// save state of restart point
+		// save state of restart point
+		if (!(g_opts & OPT_AUTOSAVE) && isUnknownCdrom) {
+			holdResetEvent = 1;
+		}
+		if ((memcardFlag==0)&&(memcardFlagOld==0)) {
+		}
+		else {
+			memcardResetFlag = 1;
+			return;
+		}
+		if (holdResetEvent) return;
+		ret = emu_auto_save_state(0);
+		snprintf(hud_msg, sizeof(hud_msg), ret == 0 ? "LOADED" : "FAIL!");
+		if (ret) {
+			char path[MAXPATHLEN];
+			struct stat st;
+
+			snprintf(path, sizeof(path), "." PCSX_DOT_DIR "filename.txt");
+			ret = stat(path, &st);
+			if (!ret) {
+				remove(path);
+			}
+		}
+		else {
+			// screen picture
+			char buf[MAXPATHLEN];
+			void *scrbuf;
+			int w, h, bpp;
+
+			scrbuf = pl_prepare_screenshot(&w, &h, &bpp);
+			get_gameid_filename(buf, sizeof(buf),
+				"." SCSHOT_DIR "%.32s-%.9s.png", 0);
+			ret = -1;
+			if (scrbuf != 0 && bpp == 16)
+				ret = writepng(buf, scrbuf, w, h);
+			if (ret == 0)
+				snprintf(hud_msg, sizeof(hud_msg), "SCREENSHOT TAKEN");
+
+			// save file
+			make_file_name();
+		}
+		// emulator exit
+		stop = 1;
+		g_emu_want_quit = 1;
 	default:
 		return;
 	}
@@ -394,7 +520,7 @@ void emu_on_new_cd(int show_hud_msg)
 	}
 
 	if (show_hud_msg) {
-		snprintf(hud_msg, sizeof(hud_msg), BOOT_MSG);
+		//snprintf(hud_msg, sizeof(hud_msg), BOOT_MSG);
 		hud_new_msg = 3;
 	}
 }
@@ -477,7 +603,8 @@ static void check_profile(void) {
 	create_profile_dir(CHEATS_DIR);
 	create_profile_dir(PATCHES_DIR);
 	create_profile_dir(PCSX_DOT_DIR "cfg");
-	create_profile_dir("/screenshots/");
+//	create_profile_dir("/screenshots/");
+	create_profile_dir(SCSHOT_DIR);
 }
 
 static void check_memcards(void)
@@ -486,7 +613,7 @@ static void check_memcards(void)
 	FILE *f;
 	int i;
 
-	for (i = 1; i <= 9; i++) {
+	for (i = 1; i <= 2; i++) {
 		snprintf(buf, sizeof(buf), ".%scard%d.mcd", MEMCARD_DIR, i);
 
 		f = fopen(buf, "rb");
@@ -499,8 +626,41 @@ static void check_memcards(void)
 	}
 }
 
+static int check_prepare_suspend(void)
+{
+	char path[256];
+	int ret = -1;
+	FILE *f;
+	snprintf(path, sizeof(path), POWER_DIR POWER_OFF_FILE);
+	f = fopen(path, "rb");
+	if (f == NULL) {
+		ret = 0;
+	}
+	else {
+		ret = -1;
+		fclose(f);
+	}
+	return ret;
+}
+
+#ifdef UI_INTEGRATION
+int main_ui(int argc, char *argv[]);
+
 int main(int argc, char *argv[])
 {
+	printf("+ frontend/main()\n");
+	main_ui(argc,argv);
+	printf("- frontend/main()\n");
+}
+int main_ui(int argc, char *argv[])
+{
+	printf("+ frontend/main_ui()\n");
+#else
+int main(int argc, char *argv[])
+{
+	//printf("+ frontend/main()\n");
+#endif
+
 	char file[MAXPATHLEN] = "";
 	char path[MAXPATHLEN];
 	const char *cdfile = NULL;
@@ -508,6 +668,7 @@ int main(int argc, char *argv[])
 	int psxout = 0;
 	int loadst = 0;
 	int i;
+	int isGame = 0;
 
 	emu_core_preinit();
 
@@ -521,6 +682,8 @@ int main(int argc, char *argv[])
 			SysPrintf("Using config file %s.\n", cfgfile_basename);
 		}
 		else if (!strcmp(argv[i], "-cdfile")) {
+			printf("argv[i]=%s\n",argv[i]);
+			printf("argv[i+1]=%s\n",argv[i+1]);
 			char isofilename[MAXPATHLEN];
 
 			if (i+1 >= argc) break;
@@ -541,6 +704,39 @@ int main(int argc, char *argv[])
 			if (i+1 >= argc) break;
 			loadst_f = argv[++i];
 		}
+		else if (!strcmp(argv[i], "-display")) {
+			if (i+1 >= argc) {
+				break;
+			}
+			display_mode = atoi(argv[++i]);
+			if (DISPLAY_MODE_MIN > display_mode || DISPLAY_MODE_MAX < display_mode) {
+				display_mode = DISPLAY_MODE_DEFAULT;
+			}
+		}
+		else if (!strcmp(argv[i], "-lang")) {
+			if (i+1 >= argc) {
+				break;
+			}
+			language = atoi(argv[++i]);
+			if (LANGUAGE_MIN > language || LANGUAGE_MAX < language) {
+				language = LANGUAGE_DEFAULT;
+			}
+		}
+		else if (!strcmp(argv[i], "-region")) {
+			if (i+1 >= argc) {
+				break;
+			}
+			region = atoi(argv[++i]);
+			if (REGION_MIN > region || REGION_MAX < region) {
+				region = REGION_DEFAULT;
+			}
+		}
+		else if (!strcmp(argv[i], "-enter")) {
+			if (i+1 >= argc) {
+				break;
+			}
+			enter_mode = atoi(argv[++i]);
+		}
 		else if (!strcmp(argv[i], "-h") ||
 			 !strcmp(argv[i], "-help") ||
 			 !strcmp(argv[i], "--help")) {
@@ -555,6 +751,11 @@ int main(int argc, char *argv[])
 							"\t-h -help\tDisplay this message\n"
 							"\tfile\t\tLoads a PSX EXE file\n"));
 			 return 0;
+		}
+		else if (!strcmp(argv[i], "-v") ||
+			!strcmp(argv[i], "--version")) {
+				printf(REV "\n");
+				return 0;
 		} else {
 			strncpy(file, argv[i], MAXPATHLEN);
 			if (file[0] != '/') {
@@ -568,16 +769,26 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
+	sprintf(changedisc_message, "%s%s%s%s", LANG_IMG_DIR, "msg_current_inserted_disc_info_", lang_list[language-1], ".png");
+	sprintf(solodisc_message, "%s%s%s%s", LANG_IMG_DIR, "msg_cant_change_discs_this_game_", lang_list[language-1], ".png");
+	sprintf(nottime_message, "%s%s%s%s", LANG_IMG_DIR, "msg_cant_change_discs_now_", lang_list[language-1], ".png");
+	sprintf(ok_image, "%s%s%s%s", DISK_IMG_DIR, "OK_SD_Btn_", lang_list[language-1], ".png");
 
-	if (cdfile)
+	if (cdfile) {
+		printf("set_cd_image(cdfile)\n");
 		set_cd_image(cdfile);
+	}
 
 	// frontend stuff
 	// init input but leave probing to platform code,
 	// they add input drivers and may need to modify them after probe
 	in_init();
 	pl_init();
-	plat_init();
+        if (cdfile != NULL) {
+		isGame = 1;
+        }
+	plat_init(isGame, enter_mode);
+	setTitleName();
 	menu_init(); // loads config
 
 	if (emu_core_init() != 0)
@@ -603,6 +814,9 @@ int main(int argc, char *argv[])
 	plugin_call_rearmed_cbs();
 
 	CheckCdrom();
+	// save file
+	make_file_name();
+	save_error(ERROR_PCSXCRITICALERROR, "Sorry, error occurred during running system...");
 	SysReset();
 
 	if (file[0] != '\0') {
@@ -641,16 +855,38 @@ int main(int argc, char *argv[])
 		menu_loop();
 
 	pl_start_watchdog();
+        // create thread for watching communication file
+        if (create_power_off_thread() != 0) {
+               printf("failed to create power off thread\n");
+               return -1;
+        }
+        if (check_prepare_suspend() != 0) {
+               power_off();
+        }
+        // create thread for watching cpu temperature
+        if (begin_watch_cpu_temperature() != 0) {
+               printf("failed to create thread for watching cpu temperature\n");
+               return -1;
+        }
 
+	StartCheckOpen();
+
+	printf("while (g_emu_want_quit=%d) start \n",g_emu_want_quit);
 	while (!g_emu_want_quit)
 	{
 		stop = 0;
 		emu_action = SACTION_NONE;
 
 		psxCpu->Execute();
-		if (emu_action != SACTION_NONE)
+#ifdef UI_INTEGRATION
+		g_emu_want_quit = -1;
+#else
+		if (emu_action != SACTION_NONE) {
 			do_emu_action();
+		}
+#endif
 	}
+	printf("while (g_emu_want_quit=%d) end \n",g_emu_want_quit);
 
 	printf("Exit..\n");
 	ClosePlugins();
@@ -658,6 +894,9 @@ int main(int argc, char *argv[])
 	menu_finish();
 	plat_finish();
 
+	unlink(STATUS_DIR"001.sts");
+	
+	printf("- plat_sdl/main.c:main()\n");
 	return 0;
 }
 
@@ -760,6 +999,24 @@ int emu_check_state(int slot)
 		return ret;
 
 	return CheckState(fname);
+}
+
+int emu_auto_save_state(int slot)
+{
+	char fname[MAXPATHLEN];
+	int ret;
+
+	ret = get_state_filename(fname, sizeof(fname), slot);
+	if (ret != 0)
+		return ret;
+
+	ret = SaveStateWork(fname);
+#ifdef HAVE_PRE_ARMV7 /* XXX GPH hack */
+	sync();
+#endif
+	SysPrintf("* %s \"%s\" [%d]\n",
+		ret == 0 ? "saved" : "failed to save", fname, slot);
+	return ret;
 }
 
 int emu_save_state(int slot)
@@ -1029,3 +1286,165 @@ void SysCloseLibrary(void *lib) {
 #endif
 }
 
+static int check_poweroff_event(int power_fd) {
+	int i = 0;
+	char buffer[BUF_LEN];
+	int event_length = 0;
+	char file_name[sizeof(POWER_OFF_FILE)] = POWER_OFF_FILE;
+
+	event_length = read(power_fd, buffer, BUF_LEN);
+	if(event_length <= 0) {
+		return 1;
+	}
+	while (i < event_length) {
+		struct inotify_event* event = (struct inotify_event *) &buffer[i];
+		if (strcmp(file_name, event->name) == 0) {
+			 return 0;
+		}
+		i += EVENT_SIZE + event->len;
+	}
+	return 1;
+}
+
+static void power_manage(void) {
+	int power_fd = -1;
+	int power_wd = -1;
+	int is_power_on = 1;
+
+	power_fd = inotify_init();
+	if(power_fd == -1) {
+		printf("ERROR:failed to init inotify for power manage\n");
+		return;
+	}
+
+	power_wd = inotify_add_watch(power_fd, POWER_DIR, IN_CREATE);
+	if(power_wd == -1) {
+		printf("ERROR:failed to add watch descriptor for power manage\n");
+		return;
+	}
+
+	while (is_power_on) {
+		is_power_on = check_poweroff_event(power_fd);
+	}
+
+	inotify_rm_watch(power_fd, power_wd);
+	close(power_fd);
+
+	power_off_flg = 1;
+
+	return;
+}
+
+int create_power_off_thread(void) {
+	int ret;
+	pthread_attr_t power_manage_attr;
+
+	if (th_power_off_state > 0) {
+		printf("auto power off thread is already started, id [%d] \n", th_power_off_state);
+		return -1;
+	}
+	pthread_attr_init(&power_manage_attr);
+	pthread_attr_setdetachstate(&power_manage_attr , PTHREAD_CREATE_DETACHED);
+
+	ret = pthread_create(&th_power_off_state, &power_manage_attr, (void*)power_manage, NULL);
+	pthread_attr_destroy(&power_manage_attr);
+
+	return ret;
+}
+
+void power_off(void)
+{
+        char path[MAXPATHLEN];
+        struct stat st;
+
+        snprintf(path, sizeof(path), "." PCSX_DOT_DIR "filename.txt");
+        if(stat(path, &st) == 0) {
+		remove(path);
+        }
+
+	// terminate pcsx
+        stop = 1;
+        g_emu_want_quit = 1;
+}
+
+// sub-thread for watching cpu temperature
+static int check_cpu_temperature(int cpu_temp_fd)
+{
+	int cpu_temperature, cpu_mode;
+	FILE *fp;
+	char buffer[BUF_LEN];
+	int ret;
+
+	int is_normal_temp = 1;
+	int event_length = 0;
+
+	event_length = read(cpu_temp_fd, buffer, BUF_LEN);
+	if(event_length <= 0) {
+		return 0;
+	}
+	fp = fopen(CPU_TEMP_FILE, "r");
+	ret = fscanf(fp, "%d%d", &cpu_temperature, &cpu_mode);
+	if (ret != EOF) {
+		is_normal_temp = (cpu_temperature < cpu_temp_limit) ? 1 : 0;
+	}
+	fclose(fp);
+	return is_normal_temp;
+}
+
+static void watch_cpu_temperature(void)
+{
+	int cpu_temp_fd;
+	int cpu_temp_wd;
+	char temp_limit_str[strlen(CPU_TEMP_LIMIT_STRING)+1];
+	int temp_limit_val;
+	int ret;
+	FILE *fp;
+
+	cpu_temp_fd = inotify_init();
+	if (cpu_temp_fd == -1) {
+		printf("ERROR:failed to init inotify for cpu temperature\n");
+	}
+
+	cpu_temp_wd = inotify_add_watch(cpu_temp_fd, CPU_TEMP_FILE, IN_MODIFY);
+	if (cpu_temp_wd == -1) {
+		printf("ERROR:failed to add watch descriptor for cpu temperature\n");
+	}
+
+	fp = fopen(CPU_TEMP_LIMIT_FILE, "r");
+	if (fp != NULL) {
+		do {
+			ret = fscanf(fp, "%s%d", &temp_limit_str, &temp_limit_val);
+			if (strcmp(temp_limit_str, CPU_TEMP_LIMIT_STRING) == 0) {
+				cpu_temp_limit = temp_limit_val;
+				break;
+			}
+		} while (ret != EOF);
+	}
+	fclose(fp);
+
+	while (1) {
+		ret = check_cpu_temperature(cpu_temp_fd);
+		if (ret == 0) {
+			break;
+		}
+	}
+
+	inotify_rm_watch(cpu_temp_fd, cpu_temp_wd);
+	close(cpu_temp_fd);
+
+	is_high_temperature = 1;
+}
+
+int begin_watch_cpu_temperature(void)
+{
+        int ret;
+        pthread_attr_t cpu_temp_attr;
+
+        pthread_attr_init(&cpu_temp_attr);
+        pthread_attr_setdetachstate(&cpu_temp_attr , PTHREAD_CREATE_DETACHED);
+
+        ret = pthread_create(&cpu_temp_thread, &cpu_temp_attr, watch_cpu_temperature, NULL);
+        pthread_attr_destroy(&cpu_temp_attr);
+
+        return ret;
+}

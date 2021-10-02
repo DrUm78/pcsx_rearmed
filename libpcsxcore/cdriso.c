@@ -220,8 +220,8 @@ static void *playthread(void *param)
 				}
 			}
 
-			// can't do it yet due to readahead..
-			//cdrAttenuate((short *)sndbuffer, s / 4, 1);
+			cdrAttenuate((short *)sndbuffer, s / 4, 1);
+
 			do {
 				ret = SPU_playCDDAchannel((short *)sndbuffer, s);
 				if (ret == 0x7761)
@@ -1037,7 +1037,7 @@ static int opensubfile(const char *isoname) {
 	strncpy(subname, isoname, sizeof(subname));
 	subname[MAXPATHLEN - 1] = '\0';
 	if (strlen(subname) >= 4) {
-		strcpy(subname + strlen(subname) - 4, ".sub");
+		strcpy(subname + strlen(subname) - 4, ".otf");
 	}
 	else {
 		return -1;
@@ -1278,7 +1278,7 @@ static long CALLBACK ISOopen(void) {
 	}
 
 	if (!subChanMixed && opensubfile(GetIsoFile()) == 0) {
-		SysPrintf("[+sub]");
+		SysPrintf("[+otf]");
 	}
 	if (opensbifile(GetIsoFile()) == 0) {
 		SysPrintf("[+sbi]");
@@ -1479,8 +1479,13 @@ static long CALLBACK ISOreadTrack(unsigned char *time) {
 		return -1;
 
 	if (subHandle != NULL) {
-		fseek(subHandle, sector * SUB_FRAMESIZE, SEEK_SET);
-		fread(subbuffer, 1, SUB_FRAMESIZE, subHandle);
+		int r = fseek(subHandle, sector * SUB_FRAMESIZE, SEEK_SET);
+		if (r == 0) {
+			if (fread(subbuffer, 1, SUB_FRAMESIZE, subHandle) < SUB_FRAMESIZE)
+				memset(subbuffer, 0, sizeof(subbuffer));
+		} else {
+			memset(subbuffer, 0, sizeof(subbuffer));
+		}
 
 		if (subChanRaw) DecodeRawSubData();
 	}

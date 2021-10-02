@@ -1,4 +1,4 @@
-/*
+﻿/*
  * (C) Gražvydas "notaz" Ignotas, 2010-2015
  *
  * This work is licensed under the terms of any of these licenses
@@ -36,15 +36,21 @@
 #include "../libpcsxcore/cdriso.h"
 #include "../libpcsxcore/cheat.h"
 #include "../libpcsxcore/new_dynarec/new_dynarec.h"
+#include "../libpcsxcore/title.h"
 #include "../plugins/dfinput/externals.h"
 #include "../plugins/dfsound/spu_config.h"
 #include "psemu_plugin_defs.h"
 #include "arm_features.h"
 #include "revision.h"
 
+#define CONFIG_JP_BIOS_NAME	"romJP.bin"
+#define CONFIG_WORLD_BIOS_NAME	"romw.bin"
+
 #define REARMED_BIRTHDAY_TIME 1293306830	/* 25 Dec 2010 */
 
 #define array_size(x) (sizeof(x) / sizeof(x[0]))
+
+#define DEFAULT_OPEN_INVALID_TIME 22
 
 typedef enum
 {
@@ -92,7 +98,7 @@ typedef enum
 static int last_vout_w, last_vout_h, last_vout_bpp;
 static int cpu_clock, cpu_clock_st, volume_boost, frameskip;
 static char last_selected_fname[MAXPATHLEN];
-static int config_save_counter, region, in_type_sel1, in_type_sel2;
+static int config_save_counter, in_type_sel1, in_type_sel2;
 static int psx_clock;
 static int memcard1_sel = -1, memcard2_sel = -1;
 extern int g_autostateld_opt;
@@ -100,6 +106,8 @@ int g_opts, g_scaler, g_gamma = 100;
 int scanlines, scanline_level = 20;
 int soft_scaling, analog_deadzone; // for Caanoo
 int soft_filter;
+int region;
+int open_invalid_time;
 
 #ifndef HAVE_PRE_ARMV7
 #define DEFAULT_PSX_CLOCK 57
@@ -130,6 +138,9 @@ static int bios_sel, gpu_plugsel, spu_plugsel;
 
 static int min(int x, int y) { return x < y ? x : y; }
 static int max(int x, int y) { return x > y ? x : y; }
+
+static void menu_leave_emu(void);
+void menu_prepare_emu(void);
 
 void emu_make_path(char *buff, const char *end, int size)
 {
@@ -321,10 +332,187 @@ static void menu_sync_config(void)
 		in_probe();
 		allow_abs_only_old = in_evdev_allow_abs_only;
 	}
-
+	config_change();
 	spu_config.iVolume = 768 + 128 * volume_boost;
 	pl_rearmed_cbs.frameskip = frameskip - 1;
 	pl_timing_prepare(Config.PsxType);
+}
+
+void config_change() {
+       // SPU
+       if (isTitleName(FINAL_FANTANSY_VII_DICS_1_EU) ||
+          isTitleName(FINAL_FANTANSY_VII_DICS_1_JP) ||
+          isTitleName(FINAL_FANTANSY_VII_DICS_1_US) ||
+          isTitleName(FINAL_FANTANSY_VII_DICS_2_EU) ||
+          isTitleName(FINAL_FANTANSY_VII_DICS_2_JP) ||
+          isTitleName(FINAL_FANTANSY_VII_DICS_2_US) ||
+          isTitleName(FINAL_FANTANSY_VII_DICS_3_EU) ||
+          isTitleName(FINAL_FANTANSY_VII_DICS_3_JP) ||
+          isTitleName(FINAL_FANTANSY_VII_DICS_3_US) ||
+          isTitleName(FINAL_FANTANSY_VII_DICS_4_JP) ||
+          isTitleName(G_DARIUS_JP) ||
+          isTitleName(HARRY_POTTER_AND_THE_PHILOSOPHERS_STONE_EU) ||
+//          isTitleName(IQ_INTELLIGENT_QUBE_JP) || // no need because the issue does not occur
+          isTitleName(IQ_INTELLIGENT_QUBE_US) ||
+          isTitleName(JUMPING_FLASH_EU) ||
+          isTitleName(JUMPING_FLASH_JP) ||
+          isTitleName(JUMPING_FLASH_US) ||
+          isTitleName(KAGERO_JP) ||
+          isTitleName(LEGACY_OF_KAIN_SOUL_REAVER_EU) ||
+          isTitleName(LEGACY_OF_KAIN_SOUL_REAVER_US) ||
+          isTitleName(MEDAL_OF_HONOR_EU) ||
+          isTitleName(MEDAL_OF_HONOR_US) ||
+          isTitleName(MEDIEVIL_EU) ||
+          isTitleName(MEDIEVIL_US) ||
+          isTitleName(MEGA_MAM_LEGENDS_JP) ||
+          isTitleName(METAL_GEAR_SOLID_DISC_1_EU) ||
+          isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+          isTitleName(METAL_GEAR_SOLID_DISC_1_US) ||
+          isTitleName(METAL_GEAR_SOLID_DISC_2_EU) ||
+          isTitleName(METAL_GEAR_SOLID_DISC_2_JP) ||
+          isTitleName(METAL_GEAR_SOLID_DISC_2_US) ||
+          isTitleName(ODDWORLD_ABES_ODDYSEE_EU) ||
+          isTitleName(ODDWORLD_ABES_ODDYSEE_US) ||
+          isTitleName(PARASITE_EVE_DISC_1_JP) ||
+          isTitleName(PARASITE_EVE_DISC_1_US) ||
+          isTitleName(PARASITE_EVE_DISC_2_JP) ||
+          isTitleName(PARASITE_EVE_DISC_2_US) ||
+          isTitleName(SAGAFRONTIER_JP) ||
+          isTitleName(SPEC_OPS_STEALTH_PATROL_US) ||
+          isTitleName(SUIKODEN_EU) ||
+          isTitleName(SUIKODEN_JP) ||
+          isTitleName(SUIKODEN_US) ||
+          isTitleName(SYPHON_FILTER_US) ||
+          isTitleName(TEKKEN3_EU) ||
+          isTitleName(TEKKEN3_JP) ||
+          isTitleName(TOMBA_JP) ||
+          isTitleName(TOMBA_US) ||
+          isTitleName(TONY_HAWK_SKATE_BOARDING_EU) ||
+          isTitleName(TONY_HAWKS_PRO_SKATER_2_EU) ||
+          isTitleName(TONY_HAWKS_PRO_SKATER_2_US) ||
+          isTitleName(VAGRANT_STORY_EU) ||
+          isTitleName(VAGRANT_STORY_US) ||
+          isTitleName(WILD_ARMS_JP) ||
+          isTitleName(WILD_ARMS_US)) {
+                spu_config.iUseInterpolation = 2;
+        } else if(isTitleName(FIGHTING_FORCE_US) ||
+          isTitleName(RESIDENT_EVIL_EU) ||
+          isTitleName(RESIDENT_EVIL_JP) ||
+          isTitleName(RESIDENT_EVIL_US) ||
+          isTitleName(TOM_CLANCYS_RAINBOW_SIX_EU)) {
+                spu_config.iUseInterpolation = 3;
+        }
+
+	if (isTitleName(CHOCOBOS_JP) ||
+		isTitleName(CRASH_BANDICOOT_EU) ||
+		isTitleName(DESTRUCTION_DERBY_EU) ||
+		isTitleName(DESTRUCTION_DERBY_US) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_1_EU) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_1_JP) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_1_US) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_2_EU) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_2_JP) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_2_US) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_3_EU) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_3_JP) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_3_US) ||
+		isTitleName(FINAL_FANTANSY_VII_DICS_4_JP) ||
+		isTitleName(PARASITE_EVE_DISC_1_JP) ||
+		isTitleName(PARASITE_EVE_DISC_1_US) ||
+		isTitleName(PARASITE_EVE_DISC_2_JP) ||
+		isTitleName(PARASITE_EVE_DISC_2_US) ||
+		isTitleName(SAGAFRONTIER_JP) ||
+		isTitleName(SPEC_OPS_STEALTH_PATROL_US) ||
+		isTitleName(SUIKODEN_EU) ||
+		isTitleName(SUIKODEN_JP) ||
+		isTitleName(SUIKODEN_US) ||
+		isTitleName(TOMBA_JP) ||
+		isTitleName(TOMBA_US) ||
+		isTitleName(VAGRANT_STORY_EU) ||
+		isTitleName(VAGRANT_STORY_US) ||
+                isTitleName(MEDAL_OF_HONOR_EU) ||
+                isTitleName(MEDAL_OF_HONOR_US)) {
+		spu_config.iUseThread = 0;
+	}
+
+        if (isTitleName(FINAL_FANTANSY_VII_DICS_1_EU) ||
+                isTitleName(FINAL_FANTANSY_VII_DICS_1_JP) ||
+                isTitleName(FINAL_FANTANSY_VII_DICS_1_US) ||
+                isTitleName(FINAL_FANTANSY_VII_DICS_2_EU) ||
+                isTitleName(FINAL_FANTANSY_VII_DICS_2_JP) ||
+                isTitleName(FINAL_FANTANSY_VII_DICS_2_US) ||
+                isTitleName(FINAL_FANTANSY_VII_DICS_3_EU) ||
+                isTitleName(FINAL_FANTANSY_VII_DICS_3_JP) ||
+                isTitleName(FINAL_FANTANSY_VII_DICS_3_US) ||
+                isTitleName(FINAL_FANTANSY_VII_DICS_4_JP) ||
+                isTitleName(G_DARIUS_JP) ||
+		isTitleName(PERSONA_JP) ||
+		isTitleName(PERSONA_US)) {
+                spu_config.iTempo = 1;
+        }
+
+        // Interlace
+	if (isTitleName(EHRGEIZ_JP)) {
+		pl_rearmed_cbs.gpu_neon.allow_interlace = 0;
+	}
+
+        // Region
+	if (isTitleName(WILD_ARMS_2_DISC_1_JP) ||
+		isTitleName(WILD_ARMS_2_DISC_2_JP) ||
+		isTitleName(WILD_ARMS_JP)) {
+		Config.PsxAuto = 0;
+		Config.PsxType = 0;
+	}
+
+        // Gpu plugin exchange
+        if (isTitleName(METAL_GEAR_SOLID_DISC_1_EU) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_1_US) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_2_EU) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_2_JP) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_2_US) ||
+                 isTitleName(PERSONA_JP) ||
+                 isTitleName(PERSONA_US) ||
+                 isTitleName(SAGAFRONTIER_JP) ||
+                 isTitleName(TOSHINDEN_EU) ||
+                 isTitleName(TOSHINDEN_JP) ||
+                 isTitleName(TOSHINDEN_US)) {
+		strcpy(Config.Gpu,"gpu_peops.so");
+
+		if (isTitleName(TOSHINDEN_EU) ||
+                    isTitleName(TOSHINDEN_JP) ||
+                    isTitleName(TOSHINDEN_US)) {
+			pl_rearmed_cbs.gpu_peops.isToShinDen = 1;
+		}
+	}
+
+	if (isTitleName(METAL_GEAR_SOLID_DISC_1_US) ||
+            isTitleName(METAL_GEAR_SOLID_DISC_2_US)) {
+		pl_rearmed_cbs.gpu_peops.regions = 1;
+	} else if (isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+                   isTitleName(METAL_GEAR_SOLID_DISC_2_JP)){
+		pl_rearmed_cbs.gpu_peops.regions = 2;
+	} else {
+		pl_rearmed_cbs.gpu_peops.regions = 0;
+	}
+
+        // Dithering
+	if (isTitleName(METAL_GEAR_SOLID_DISC_1_EU) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_1_US) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_2_EU) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_2_JP) ||
+                 isTitleName(METAL_GEAR_SOLID_DISC_2_US) ||
+                 isTitleName(SAGAFRONTIER_JP)) {
+		pl_rearmed_cbs.gpu_peops.iUseDither = 2;
+	}else if(isTitleName(PERSONA_JP) ||
+	         isTitleName(PERSONA_US)) {
+        pl_rearmed_cbs.gpu_peops.iUseDither = 3;
+	}
+
+    if (isTitleName(SAGAFRONTIER_JP)) {
+        pl_rearmed_cbs.gpu_peops.iTrimJaggyFrame = 1;
+    }
 }
 
 static void menu_set_defconfig(void)
@@ -345,9 +533,10 @@ static void menu_set_defconfig(void)
 	psx_clock = DEFAULT_PSX_CLOCK;
 
 	region = 0;
+	g_opts |= OPT_AUTOSAVE;
 	in_type_sel1 = in_type_sel2 = 0;
 	in_evdev_allow_abs_only = 0;
-
+	open_invalid_time = DEFAULT_OPEN_INVALID_TIME;
 	menu_sync_config();
 }
 
@@ -420,6 +609,7 @@ static const struct {
 	CE_INTVAL(memcard1_sel),
 	CE_INTVAL(memcard2_sel),
 	CE_INTVAL(g_autostateld_opt),
+	CE_INTVAL(open_invalid_time),
 	CE_INTVAL_N("adev0_is_nublike", in_adev_is_nublike[0]),
 	CE_INTVAL_N("adev1_is_nublike", in_adev_is_nublike[1]),
 	CE_INTVAL_V(frameskip, 3),
@@ -460,7 +650,12 @@ static char *get_cd_label(void)
 	static char trimlabel[33];
 	int j;
 
-	strncpy(trimlabel, CdromLabel, 32);
+	if (CdromLabel[0] != '\0' && !(g_opts & OPT_AUTOSAVE)) {
+		strncpy(trimlabel, CdromLabel, 32);
+	}
+	else {
+		strncpy(trimlabel, CdromLabel_old, 32);
+	}
 	trimlabel[32] = 0;
 	for (j = 31; j >= 0; j--)
 		if (trimlabel[j] == ' ')
@@ -518,6 +713,7 @@ static int menu_write_config(int is_game)
 	}
 
 	keys_write_all(f);
+	fsync(fileno(f));
 	fclose(f);
 
 	return 0;
@@ -545,6 +741,7 @@ static int menu_do_last_cd_img(int is_get)
 	}
 	else
 		fprintf(f, "%s\n", last_selected_fname);
+	fsync(fileno(f));
 	fclose(f);
 
 out:
@@ -622,6 +819,22 @@ static int menu_load_config(int is_game)
 
 		if (config_data[i].len == 0) {
 			parse_str_val(config_data[i].val, tmp);
+
+			if(strcmp(config_data[i].name,"Bios") == 0) {
+				// set BIOS name by me.
+				char iso_path[MAXPATHLEN];
+				char *iso_char;
+				strcpy(iso_path, GetIsoFile());
+				iso_char = strrchr(iso_path, '/');
+				if (iso_char != NULL) {
+					iso_char += 3;
+					if(*iso_char == 'P' || *iso_char == 'p') {
+						strcpy(config_data[i].val, CONFIG_JP_BIOS_NAME);
+					} else {
+						strcpy(config_data[i].val, CONFIG_WORLD_BIOS_NAME);
+					}
+				}
+			}
 			continue;
 		}
 
@@ -691,16 +904,9 @@ fail:
 			snprintf(Config.Mcd1, sizeof(Config.Mcd1), ".%s%s",
 				MEMCARD_DIR, memcards[memcard1_sel]);
 	}
-	if ((unsigned int)memcard2_sel < ARRAY_SIZE(memcards)) {
-		if (memcard2_sel == 0)
-			strcpy(Config.Mcd2, "none");
-		else if (memcards[memcard2_sel] != NULL)
-			snprintf(Config.Mcd2, sizeof(Config.Mcd2), ".%s%s",
-				MEMCARD_DIR, memcards[memcard2_sel]);
-	}
+	strcpy(Config.Mcd2, "none");
 	if (strcmp(mcd1_old, Config.Mcd1) || strcmp(mcd2_old, Config.Mcd2))
 		LoadMcds(Config.Mcd1, Config.Mcd2);
-
 	return ret;
 }
 
@@ -872,6 +1078,9 @@ me_bind_action emuctrl_actions[] =
 	{ "Volume Up        ", 1 << SACTION_VOLUME_UP },
 	{ "Volume Down      ", 1 << SACTION_VOLUME_DOWN },
 #endif
+	{ "RESET button     ", 1 << SACTION_RESET_EVENT },
+//	{ "Power button     ", 0 },
+	{ "CD Change button     ", 1 << SACTION_CD_CHANGE },
 	{ NULL,                0 }
 };
 
@@ -1606,6 +1815,7 @@ static menu_entry e_menu_options[] =
 //	mee_enum_h    ("Confirm savestate",        0, dummy, men_confirm_save, h_confirm_save),
 	mee_enum_h    ("Frameskip",                0, frameskip, men_frameskip, h_frameskip),
 	mee_onoff     ("Show FPS",                 0, g_opts, OPT_SHOWFPS),
+	mee_onoff     ("Auto Save State",          0, g_opts, OPT_AUTOSAVE),
 	mee_enum      ("Region",                   0, region, men_region),
 	mee_range     ("CPU clock",                MA_OPT_CPU_CLOCKS, cpu_clock, 20, 5000),
 #ifdef C64X_DSP
@@ -1757,8 +1967,6 @@ static void handle_memcard_sel(void)
 	if (memcard1_sel != 0)
 		snprintf(Config.Mcd1, sizeof(Config.Mcd1), ".%s%s", MEMCARD_DIR, memcards[memcard1_sel]);
 	strcpy(Config.Mcd2, "none");
-	if (memcard2_sel != 0)
-		snprintf(Config.Mcd2, sizeof(Config.Mcd2), ".%s%s", MEMCARD_DIR, memcards[memcard2_sel]);
 	LoadMcds(Config.Mcd1, Config.Mcd2);
 	draw_mc_bg();
 }
@@ -1945,10 +2153,12 @@ static int reset_game(void)
 		return -1;
 
 	ClosePlugins();
+	LoadPlugins();
 	OpenPlugins();
 	SysReset();
 	if (CheckCdrom() != -1) {
 		LoadCdrom();
+		make_file_name();
 	}
 	return 0;
 }
@@ -1996,7 +2206,7 @@ static int run_exe(void)
 	const char *fname;
 
 	fname = menu_loop_romsel(last_selected_fname,
-		sizeof(last_selected_fname), exts, NULL);
+		sizeof(last_selected_fname), exts, NULL, 0);
 	if (fname == NULL)
 		return -1;
 
@@ -2032,6 +2242,7 @@ static int run_cd_image(const char *fname)
 		return -1;
 	}
 
+	make_file_name();
 	SysReset();
 
 	// Read main executable directly from CDRom and start it
@@ -2076,7 +2287,7 @@ static int romsel_run(void)
 
 	fname = menu_loop_romsel(last_selected_fname,
 			sizeof(last_selected_fname), filter_exts,
-			optional_cdimg_filter);
+			optional_cdimg_filter, 0);
 	if (fname == NULL)
 		return -1;
 
@@ -2108,13 +2319,25 @@ static int romsel_run(void)
 static int swap_cd_image(void)
 {
 	const char *fname;
-
+	struct stat status;
+	int ret;
+	ret = stat(GetIsoFile(), &status);
+	if (ret == 0) {
+		strcpy(last_selected_fname, GetIsoFile());
+	}
 	fname = menu_loop_romsel(last_selected_fname,
 			sizeof(last_selected_fname), filter_exts,
-			optional_cdimg_filter);
+			optional_cdimg_filter, 1);
 	if (fname == NULL)
 		return -1;
-
+	isUnknownCdrom = 1;
+	if (isTitleName(PARASITE_EVE_DISC_1_JP) || isTitleName(PARASITE_EVE_DISC_2_JP)
+			|| isTitleName(PARASITE_EVE_DISC_1_US) || isTitleName(PARASITE_EVE_DISC_2_US)) {
+		/* Prohibit re-selecting the disc */
+		is_disc_change = 0;
+		is_nop_count = 0;
+		nop_cnt = 0;
+	}
 	printf("selected file: %s\n", fname);
 
 	CdromId[0] = '\0';
@@ -2135,6 +2358,56 @@ static int swap_cd_image(void)
 
 	strcpy(last_selected_fname, fname);
 	return 0;
+}
+
+void swap_cd(void)
+{
+	int inp;
+
+	menu_leave_emu();
+
+	if (disc_change_type == 0) {
+		show_text_image(solodisc_message, ok_image);
+		while (!power_off_flg) {
+			inp = in_menu_wait_any(NULL, 50);
+			if (inp & PBTN_MOK) {
+				break;
+			}
+		}
+		/* wait until ok is released */
+		while (in_menu_wait_any(NULL, 50) & PBTN_MOK) {
+			if (power_off_flg) {
+				break;
+			}
+		}
+	}
+	else if (is_disc_change) {
+		swap_cd_image();
+		/* wait until ok, back is released */
+		while (in_menu_wait_any(NULL, 50) & (PBTN_MOK|PBTN_MBACK)) {
+			if (power_off_flg) {
+				break;
+			}
+		}
+		in_set_config_int(0, IN_CFG_BLOCKING, 0);
+	}
+	else {
+		show_text_image(nottime_message, ok_image);
+		while (!power_off_flg) {
+			inp = in_menu_wait_any(NULL, 50);
+			if (inp & PBTN_MOK) {
+				break;
+			}
+		}
+		/* wait until ok is released */
+		while (in_menu_wait_any(NULL, 50) & PBTN_MOK) {
+			if (power_off_flg) {
+				break;
+			}
+		}
+	}
+
+	menu_prepare_emu();
 }
 
 static int swap_cd_multidisk(void)
@@ -2162,7 +2435,7 @@ static void load_pcsx_cht(void)
 	char msg[64];
 
 	fname = menu_loop_romsel(last_selected_fname,
-			sizeof(last_selected_fname), exts, NULL);
+			sizeof(last_selected_fname), exts, NULL, 0);
 	if (fname == NULL)
 		return;
 
@@ -2230,6 +2503,7 @@ static int main_menu_handler(int id, int keys)
 		break;
 	case MA_MAIN_EXIT:
 		emu_core_ask_exit();
+		from_escape = 0;
 		return 1;
 	default:
 		lprintf("%s: something unknown selected\n", __FUNCTION__);
@@ -2248,6 +2522,27 @@ static menu_entry e_menu_main2[] =
 	mee_handler   ("Memcard manager",    menu_loop_memcards),
 	mee_handler_id("Load PCSX cheats..", MA_MAIN_LOAD_CHEATS,   main_menu_handler),
 	mee_end,
+};
+
+static int main_menu1_handler(int id, int keys)
+{
+        static int sel = 0;
+
+        me_enable(e_menu_main, MA_MAIN_RESUME_GAME, ready_to_go);
+        me_enable(e_menu_main, MA_MAIN_SAVE_STATE,  ready_to_go);
+        me_enable(e_menu_main, MA_MAIN_LOAD_STATE,  ready_to_go);
+        me_enable(e_menu_main, MA_MAIN_RESET_GAME,  ready_to_go);
+        me_enable(e_menu_main, MA_MAIN_CHEATS,      ready_to_go);
+
+        return me_loop_d(e_menu_main, &sel, NULL, draw_frame_main);
+}
+
+static menu_entry e_menu_main3[] =
+{
+        mee_handler_id("Change CD image", MA_MAIN_SWAP_CD,   main_menu_handler),
+        mee_handler   ("PCSX Menu",       main_menu1_handler),
+        mee_handler_id("Exit",            MA_MAIN_EXIT,      main_menu_handler),
+        mee_end,
 };
 
 static int main_menu2_handler(int id, int keys)
@@ -2284,13 +2579,12 @@ static menu_entry e_menu_main[] =
 
 // ----------------------------
 
-static void menu_leave_emu(void);
-
 void menu_loop(void)
 {
 	static int warned_about_bios = 0;
 	static int sel = 0;
 
+printf("frontend/menu.c : menu_loop()\n");
 	menu_leave_emu();
 
 	if (config_save_counter == 0) {
@@ -2300,12 +2594,16 @@ void menu_loop(void)
 			snprintf(Config.Bios, sizeof(Config.Bios), "%s", bioses[1]);
 			bios_sel = 1;
 		}
+
 		else if (!warned_about_bios) {
-			menu_bios_warn();
+//printf("menu.c : menu_bios_warn() warned_about_bios=%d\n",warned_about_bios);
+			//menu_bios_warn();
 			warned_about_bios = 1;
 		}
-	}
 
+	}
+printf("menu.c : menu_loop() : me_enable(e_menu_main : MA_MAIN_RESUME_GAME)\n");
+printf("        g_menuscreen_w=%d g_menuscreen_h=%d\n",g_menuscreen_w,g_menuscreen_h);
 	me_enable(e_menu_main, MA_MAIN_RESUME_GAME, ready_to_go);
 	me_enable(e_menu_main, MA_MAIN_SAVE_STATE,  ready_to_go && CdromId[0]);
 	me_enable(e_menu_main, MA_MAIN_LOAD_STATE,  ready_to_go && CdromId[0]);
@@ -2314,14 +2612,24 @@ void menu_loop(void)
 
 	in_set_config_int(0, IN_CFG_BLOCKING, 1);
 
-	do {
-		me_loop_d(e_menu_main, &sel, NULL, draw_frame_main);
-	} while (!ready_to_go && !g_emu_want_quit);
-
+	if (from_escape == 1) {
+	        do {
+	printf("menu.c : menu_loop() : me_loop_d()\n");
+			sel = 0;
+	                me_loop_d(e_menu_main3, &sel, NULL, draw_frame_main);
+        	} while (!ready_to_go && !g_emu_want_quit);
+	}
+	else {
+		do {
+	printf("menu.c : menu_loop() : me_loop_d()\n");
+			me_loop_d(e_menu_main, &sel, NULL, draw_frame_main);
+		} while (!ready_to_go && !g_emu_want_quit);
+	}
+printf("menu.c : while (in_menu_wait_any) start\n");
 	/* wait until menu, ok, back is released */
 	while (in_menu_wait_any(NULL, 50) & (PBTN_MENU|PBTN_MOK|PBTN_MBACK))
 		;
-
+printf("menu.c : while (in_menu_wait_any) end\n");
 	in_set_config_int(0, IN_CFG_BLOCKING, 0);
 
 	menu_prepare_emu();
@@ -2347,6 +2655,8 @@ static void scan_bios_plugins(void)
 	spu_plugins[0] = "builtin_spu";
 	memcards[0] = "(none)";
 	bios_i = gpu_i = spu_i = mc_i = 1;
+
+printf("menu.c : scan_bios_plugins()\n");
 
 	snprintf(fname, sizeof(fname), "%s/", Config.BiosDir);
 	dir = opendir(fname);
@@ -2483,6 +2793,8 @@ void menu_init(void)
 	char buff[MAXPATHLEN];
 	int i;
 
+printf("menu.c : menu_init()\n");
+
 	cpu_clock_st = cpu_clock = plat_target_cpu_clock_get();
 
 	scan_bios_plugins();
@@ -2549,25 +2861,24 @@ static void menu_leave_emu(void)
 			fprintf(stderr, "Warning: GPU_close returned %d\n", ret);
 	}
 
-	plat_video_menu_enter(ready_to_go);
+	plat_video_menu_enter(ready_to_go, last_vout_bpp);
 
-	memcpy(g_menubg_ptr, g_menubg_src_ptr, g_menuscreen_w * g_menuscreen_h * 2);
 	if (pl_vout_buf != NULL && ready_to_go) {
-		int x = max(0, g_menuscreen_w - last_vout_w);
-		int y = max(0, g_menuscreen_h / 2 - last_vout_h / 2);
-		int w = min(g_menuscreen_w, last_vout_w);
-		int h = min(g_menuscreen_h, last_vout_h);
+		int x = 0;
+		int y = 0;
+		int w = g_menuscreen_w;
+		int h = g_menuscreen_h;
 		u16 *d = (u16 *)g_menubg_ptr + g_menuscreen_w * y + x;
 		char *s = pl_vout_buf;
 
 		if (last_vout_bpp == 16) {
-			for (; h > 0; h--, d += g_menuscreen_w, s += last_vout_w * 2)
+			for (; h > 0; h--, d += w, s += w * 2)
 				menu_darken_bg(d, s, w, 0);
 		}
 		else {
-			for (; h > 0; h--, d += g_menuscreen_w, s += last_vout_w * 3) {
-				rgb888_to_rgb565(d, s, w * 3);
-				menu_darken_bg(d, d, w, 0);
+			for (; h > 0; h--, d += w, s += w * 3) {
+				bgr888_to_rgb565(s, s, w * 3);
+				menu_darken_bg(d, s, w, 0);
 			}
 		}
 	}
@@ -2624,4 +2935,53 @@ void menu_finish(void)
 {
 	if (cpu_clock_st > 0)
 		plat_target_cpu_clock_set(cpu_clock_st);
+}
+
+int make_file_name(void)
+{
+	char isofile[MAXPATHLEN];
+	char isolabel[33];
+	char isoid[10];
+
+	char path[256];
+	FILE *f;
+
+	if (CdromPath[0] != '\0' && CdromLabel[0] != '\0' && CdromId[0] != '\0' && !(g_opts & OPT_AUTOSAVE)) {
+		strncpy(isofile, CdromPath, sizeof(CdromPath));
+		strncpy(isolabel, CdromLabel, sizeof(CdromLabel));
+		strncpy(isoid, CdromId, sizeof(CdromId));
+	}
+	else if (CdromPath_old[0] != '\0' && CdromLabel_old[0] != '\0' && CdromId_old[0] != '\0' && g_opts & OPT_AUTOSAVE) {
+		strncpy(isofile, CdromPath_old, sizeof(CdromPath_old));
+		strncpy(isolabel, CdromLabel_old, sizeof(CdromLabel_old));
+		strncpy(isoid, CdromId_old, sizeof(CdromId_old));
+	}
+	else {
+		printf("- %s %d make_file_name() not make!!!\n",__FILE__,__LINE__);
+		return -1;
+	}
+
+	snprintf(path, sizeof(path), "." PCSX_DOT_DIR "filename.txt");
+	f = fopen(path, "w");
+	if (f == NULL) {
+		return -1;
+	}
+
+	char trimlabel[33];
+	int j;
+
+	strncpy(trimlabel, isolabel, 32);
+	trimlabel[32] = 0;
+	for (j = 31; j >= 0; j--)
+		if (trimlabel[j] == ' ')
+			trimlabel[j] = 0;
+		else
+			continue;
+
+	fprintf(f, "%s\n", isofile);
+	fprintf(f, "%.32s-%.9s\n", trimlabel, isoid);
+
+	fsync(fileno(f));
+	fclose(f);
+	return 0;
 }

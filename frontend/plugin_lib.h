@@ -68,9 +68,14 @@ struct rearmed_cbs {
 	} gpu_neon;
 	struct {
 		int   iUseDither;
+		int   iTrimJaggyFrame;
 		int   dwActFixes;
 		float fFrameRateHz;
 		int   dwFrameRateTicks;
+		int   isToShinDen;
+		int   isBiosLogoEnd;
+		int   scenes;
+		int   regions;
 	} gpu_peops;
 	struct {
 		int   abe_hack;
@@ -99,6 +104,18 @@ extern void (*pl_plat_clear)(void);
 extern void (*pl_plat_blit)(int doffs, const void *src,
 			    int w, int h, int sstride, int bgr24);
 extern void (*pl_plat_hud_print)(int x, int y, const char *str, int bpp);
+
+enum  msg_scenes{
+	NO_SCENES = 0,
+	MSG_SCENE1,
+	MSG_SCENE2,
+	MSG_SCENE3,
+	MSG_SCENE4,
+	MSG_SCENE5,
+	MSG_SCENE6,
+	MSG_SCENE7,
+	MSG_SCENE8
+};
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))

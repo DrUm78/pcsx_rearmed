@@ -53,6 +53,7 @@ static void check_mode_change(int force)
   }
 }
 
+extern int g_gpu_patch_flag;
 void vout_update(void)
 {
   int x = gpu.screen.x & ~1; // alignment needed by blitter
@@ -80,9 +81,29 @@ void vout_update(void)
       h = vram_h - y;
   }
 
+  if (g_gpu_patch_flag & GPU_PATCH_IS_FF7) {
+    if (gpu.screen.y2 - gpu.screen.y1 == 224) {
+      y -= 8;
+      h = gpu.screen.h = 240;
+    }
+  }else if(g_gpu_patch_flag & GPU_PATCH_IS_MR_DRILLER_JP) {
+    if((gpu.screen.x1==830) && (gpu.screen.x2==3290) && (w==246)) {
+      w = 208;
+    }
+  }
+
   vram += y * 1024 + x;
 
   cbs->pl_vout_flip(vram, 1024, gpu.status.rgb24, w, h);
+
+  if (gpu.vram2 != NULL) {
+    uint16_t *p_vram2 = gpu.vram2;
+    p_vram2 += y * 1024 + x;
+    for (int i = h-1; i >= 0; i--) {
+      uint16_t *s_2 = p_vram2 + 1024*i;
+      memset((char*)s_2, 0, w * (gpu.status.rgb24 ? 3 : 2));
+    }
+  }
 }
 
 void vout_blank(void)

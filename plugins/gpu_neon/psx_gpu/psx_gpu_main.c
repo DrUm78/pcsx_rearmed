@@ -163,7 +163,12 @@ int main(int argc, char *argv[])
   if(no_display == 0) 
   {
     SDL_Init(SDL_INIT_EVERYTHING);
+#if SDL_MAJOR_VERSION == 1
     screen = SDL_SetVideoMode(1024, 512, 32, 0);
+#else
+    SDL_Window* sdl2Window;
+    screen = SDL_GetWindowSurface(sdl2Window);
+#endif
     if (screen == 0)
     {
       printf("can't set video mode: %s\n", SDL_GetError());

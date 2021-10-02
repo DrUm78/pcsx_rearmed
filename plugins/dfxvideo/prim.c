@@ -32,6 +32,11 @@ uint32_t       dwCfgFixes;
 uint32_t       dwActFixes=0;
 int            iUseFixes;
 int            iUseDither=0;
+int            isToShinDen=0;
+int            isBiosLogoEnd=0;
+int            *scenes;
+int            regions=0;
+int            iTrimJaggyFrame=0;
 BOOL           bDoVSyncUpdate=FALSE;
 
 // USE_NASM
@@ -71,6 +76,9 @@ static inline void UpdateGlobalTP(unsigned short gdata)
   case 2:
    iDither=2;
   break;
+  case 3:
+   iDither=3;
+  break;
  }
 }
 
@@ -109,8 +117,8 @@ static inline void SetRenderMode(uint32_t DrawAttributes)
 
 // 11 bit signed
 #define SIGNSHIFT 21
-#define CHKMAX_X 1024
-#define CHKMAX_Y 512
+#define CHKMAX_X 1023
+#define CHKMAX_Y 511
 
 static inline void AdjustCoord4(void)
 {
@@ -170,102 +178,32 @@ static inline void AdjustCoord1(void)
 
 static inline BOOL CheckCoord4(void)
 {
- if(lx0<0)
-  {
-   if(((lx1-lx0)>CHKMAX_X) ||
-      ((lx2-lx0)>CHKMAX_X)) 
-    {
-     if(lx3<0)
-      {
-       if((lx1-lx3)>CHKMAX_X) return TRUE;
-       if((lx2-lx3)>CHKMAX_X) return TRUE;
-      }
-    }
-  }
- if(lx1<0)
-  {
-   if((lx0-lx1)>CHKMAX_X) return TRUE;
-   if((lx2-lx1)>CHKMAX_X) return TRUE;
-   if((lx3-lx1)>CHKMAX_X) return TRUE;
-  }
- if(lx2<0)
-  {
-   if((lx0-lx2)>CHKMAX_X) return TRUE;
-   if((lx1-lx2)>CHKMAX_X) return TRUE;
-   if((lx3-lx2)>CHKMAX_X) return TRUE;
-  }
- if(lx3<0)
-  {
-   if(((lx1-lx3)>CHKMAX_X) ||
-      ((lx2-lx3)>CHKMAX_X))
-    {
-     if(lx0<0)
-      {
-       if((lx1-lx0)>CHKMAX_X) return TRUE;
-       if((lx2-lx0)>CHKMAX_X) return TRUE;
-      }
-    }
-  }
- 
-
- if(ly0<0)
-  {
-   if((ly1-ly0)>CHKMAX_Y) return TRUE;
-   if((ly2-ly0)>CHKMAX_Y) return TRUE;
-  }
- if(ly1<0)
-  {
-   if((ly0-ly1)>CHKMAX_Y) return TRUE;
-   if((ly2-ly1)>CHKMAX_Y) return TRUE;
-   if((ly3-ly1)>CHKMAX_Y) return TRUE;
-  }
- if(ly2<0)
-  {
-   if((ly0-ly2)>CHKMAX_Y) return TRUE;
-   if((ly1-ly2)>CHKMAX_Y) return TRUE;
-   if((ly3-ly2)>CHKMAX_Y) return TRUE;
-  }
- if(ly3<0)
-  {
-   if((ly1-ly3)>CHKMAX_Y) return TRUE;
-   if((ly2-ly3)>CHKMAX_Y) return TRUE;
-  }
+ // check delta x
+ if (abs(lx0 - lx1) > CHKMAX_X) return TRUE;
+ if (abs(lx1 - lx2) > CHKMAX_X) return TRUE;
+ if (abs(lx2 - lx0) > CHKMAX_X) return TRUE;
+ if (abs(lx3 - lx1) > CHKMAX_X) return TRUE;
+ if (abs(lx3 - lx2) > CHKMAX_X) return TRUE;
+ // check delta y
+ if (abs(ly0 - ly1) > CHKMAX_Y) return TRUE;
+ if (abs(ly1 - ly2) > CHKMAX_Y) return TRUE;
+ if (abs(ly2 - ly0) > CHKMAX_Y) return TRUE;
+ if (abs(ly3 - ly1) > CHKMAX_Y) return TRUE;
+ if (abs(ly3 - ly2) > CHKMAX_Y) return TRUE;
 
  return FALSE;
 }
 
 static inline BOOL CheckCoord3(void)
 {
- if(lx0<0)
-  {
-   if((lx1-lx0)>CHKMAX_X) return TRUE;
-   if((lx2-lx0)>CHKMAX_X) return TRUE;
-  }
- if(lx1<0)
-  {
-   if((lx0-lx1)>CHKMAX_X) return TRUE;
-   if((lx2-lx1)>CHKMAX_X) return TRUE;
-  }
- if(lx2<0)
-  {
-   if((lx0-lx2)>CHKMAX_X) return TRUE;
-   if((lx1-lx2)>CHKMAX_X) return TRUE;
-  }
- if(ly0<0)
-  {
-   if((ly1-ly0)>CHKMAX_Y) return TRUE;
-   if((ly2-ly0)>CHKMAX_Y) return TRUE;
-  }
- if(ly1<0)
-  {
-   if((ly0-ly1)>CHKMAX_Y) return TRUE;
-   if((ly2-ly1)>CHKMAX_Y) return TRUE;
-  }
- if(ly2<0)
-  {
-   if((ly0-ly2)>CHKMAX_Y) return TRUE;
-   if((ly1-ly2)>CHKMAX_Y) return TRUE;
-  }
+ // check delta x
+ if (abs(lx0 - lx1) > CHKMAX_X) return TRUE;
+ if (abs(lx1 - lx2) > CHKMAX_X) return TRUE;
+ if (abs(lx2 - lx0) > CHKMAX_X) return TRUE;
+ // check delta y
+ if (abs(ly0 - ly1) > CHKMAX_Y) return TRUE;
+ if (abs(ly1 - ly2) > CHKMAX_Y) return TRUE;
+ if (abs(ly2 - ly0) > CHKMAX_Y) return TRUE;
 
  return FALSE;
 }
@@ -273,44 +211,20 @@ static inline BOOL CheckCoord3(void)
 
 static inline BOOL CheckCoord2(void)
 {
- if(lx0<0)
-  {
-   if((lx1-lx0)>CHKMAX_X) return TRUE;
-  }
- if(lx1<0)
-  {
-   if((lx0-lx1)>CHKMAX_X) return TRUE;
-  }
- if(ly0<0)
-  {
-   if((ly1-ly0)>CHKMAX_Y) return TRUE;
-  }
- if(ly1<0)
-  {
-   if((ly0-ly1)>CHKMAX_Y) return TRUE;
-  }
+ // check delta x
+ if (abs(lx0 - lx1) > CHKMAX_X) return TRUE;
+ // check delta y
+ if (abs(ly0 - ly1) > CHKMAX_Y) return TRUE;
 
  return FALSE;
 }
 
 static inline BOOL CheckCoordL(short slx0,short sly0,short slx1,short sly1)
 {
- if(slx0<0)
-  {
-   if((slx1-slx0)>CHKMAX_X) return TRUE;
-  }
- if(slx1<0)
-  {
-   if((slx0-slx1)>CHKMAX_X) return TRUE;
-  }
- if(sly0<0)
-  {
-   if((sly1-sly0)>CHKMAX_Y) return TRUE;
-  }
- if(sly1<0)
-  {
-   if((sly0-sly1)>CHKMAX_Y) return TRUE;
-  }
+ // check delta x
+ if (abs(slx0 - slx1) > 1023) return TRUE;
+ // check delta y
+ if (abs(sly0 - sly1) > 511) return TRUE;
 
  return FALSE;
 }
@@ -1052,6 +966,50 @@ static void primPolyFT4(unsigned char * baseAddr)
 
  drawPoly4FT(baseAddr);
 
+ if (isToShinDen) {
+   if (GETLEs16(&sgpuData[4]) == 0x38e0 && lx1-lx0 == 0x10 && ly2-ly0 == 0x8)
+   {
+     short sW = 4;
+     short sH = 1;
+
+     lx0 = lx0 + 6;  // 0
+     ly0 = ly0 + 3;  //
+     lx1 = lx0 + sW; // 1       x 
+     ly1 = ly0;      //     +---->
+     lx2 = lx1;      // 2   | 0  1
+     ly2 = ly0 + sH; //    y|     
+     lx3 = lx0;      // 3   v 3  2
+     ly3 = ly2;      //
+
+     DrawSemiTrans = FALSE;
+     int color = -1;
+     switch (GETLEs16(&sgpuData[5]))
+     {
+       case 0x7ce0: // Yellow "H"
+         color = 0x00ffff;
+         break;
+       case 0x7da0: // Blue "H"
+         color = 0xff8c00;
+         break;
+       case 0x7d20: // Pink "H"
+         color = 0x7860f8;
+         break;
+       case 0x7d60: // light blue "H"
+         color = 0xf8f800;
+         break;
+       case 0x7de0: // white "H"
+         color = 0xffffff;
+       default:
+         break;
+     }
+
+     if (color != -1)
+     {
+       FillSoftwareAreaTrans(lx0,ly0,lx2,ly2,BGR24to16((0x40 << 24) | color));
+     }
+   }
+ }
+
  bDoVSyncUpdate=TRUE;
 }
 
@@ -1163,6 +1121,96 @@ static void primPolyGT4(unsigned char *baseAddr)
    gpuData[9] = (gpuData[9]&HOST2LE32(0xff000000))|HOST2LE32(0x00808080);
   }
 
+  if (*scenes != 0)
+  {
+    if (GETLE32(&gpuData[0]) == 0x3c808080 && GETLE32(&gpuData[3]) == 0x3c808080 && GETLE32(&gpuData[6]) == 0x3c808080 && GlobalTextTP == 0)
+    {
+      int cba = GETLEs16(&sgpuData[5]);
+      switch (*scenes)
+      {
+        case 1:
+          if (regions == 1)
+          {
+            if (cba >= 0x3a00 && cba <= 0x3d00)
+            {
+              bDoVSyncUpdate=TRUE;
+              return;
+            }
+          }
+          if (regions == 2)
+          {
+            if (cba >= 0x3c00 && cba <= 0x3e00)
+            {
+              bDoVSyncUpdate=TRUE;
+              return;
+            }
+          }
+          break;
+
+        case 2:
+        case 3:
+        case 7:
+          if (regions == 1)
+          {
+            if (cba >= 0x3d00 && cba <= 0x3d33 ||
+                cba >= 0x3d35 && cba <= 0x3e00)
+            {
+              bDoVSyncUpdate=TRUE;
+              return;
+            }
+          }
+          if (regions == 2)
+          {
+            if (cba >= 0x3da0 && cba <= 0x3dd2 ||
+                cba >= 0x3dd4 && cba <= 0x3ea0)
+            {
+              bDoVSyncUpdate=TRUE;
+              return;
+            }
+          }
+          break;
+
+        case 4:
+          if (regions == 1)
+          {
+            if (cba >= 0x3ee0 && cba <= 0x3ef7 ||
+                cba >= 0x3f00 && cba <= 0x4000)
+            {
+              bDoVSyncUpdate=TRUE;
+              return;
+            }
+          }
+          if (regions == 2)
+          {
+            if (cba >= 0x3e80 && cba <= 0x3e82 ||
+                cba >= 0x3e84 && cba <= 0x3e94 ||
+                cba >= 0x3e96 && cba <= 0x3ee0)
+            {
+              bDoVSyncUpdate=TRUE;
+              return;
+            }
+          }
+          break;
+
+        case 5:
+        case 6:
+        case 8:
+          if (regions == 1 || regions == 2)
+          {
+            if (cba >= 0x3a00 && cba <= 0x3f00)
+            {
+              bDoVSyncUpdate=TRUE;
+              return;
+            }
+          }
+          break;
+
+        default:
+          break;
+      }
+    }
+  }
+
  drawPoly4GT(baseAddr);
 
  bDoVSyncUpdate=TRUE;
@@ -1194,6 +1242,18 @@ static void primPolyF3(unsigned char *baseAddr)
  SetRenderMode(GETLE32(&gpuData[0]));
 
  drawPoly3F(GETLE32(&gpuData[0]));
+
+ if (!isBiosLogoEnd) {
+   if (GETLE32(&gpuData[1]) == 0x00e10125 && GETLE32(&gpuData[2]) == 0x00e80120 && GETLE32(&gpuData[3]) == 0x00eb010c) {
+     int color = (0x68 << 24) | (GETLE32(&gpuData[0]) & 0xffffff);
+     DrawSemiTrans = FALSE;
+
+     FillSoftwareAreaTrans(272,233,273,234,BGR24to16(color));
+     FillSoftwareAreaTrans(277,231,278,232,BGR24to16(color));
+     FillSoftwareAreaTrans(282,229,283,230,BGR24to16(color));
+     FillSoftwareAreaTrans(287,227,288,228,BGR24to16(color));
+   }
+ }
 
  bDoVSyncUpdate=TRUE;
 }

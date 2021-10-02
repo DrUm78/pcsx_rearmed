@@ -54,7 +54,19 @@ typedef struct {
 } EXE_HEADER;
 
 extern char CdromId[10];
+extern char CdromId_old[10];
 extern char CdromLabel[33];
+extern char CdromLabel_old[33];
+extern char CdromPath[MAXPATHLEN];
+extern char CdromPath_old[MAXPATHLEN];
+extern int disc_change_type;
+extern int time_to_sync_state;
+extern unsigned int memcardFlag;
+extern int isUnknownCdrom;
+extern int holdResetEvent;
+
+void StartCheckOpen(void);
+int CheckOpenEnabled(void);
 
 int LoadCdrom();
 int LoadCdromFile(const char *filename, EXE_HEADER *head);
@@ -64,6 +76,7 @@ int Load(const char *ExePath);
 int SaveState(const char *file);
 int LoadState(const char *file);
 int CheckState(const char *file);
+int SaveStateWork(void * file);
 
 int SendPcsxInfo();
 int RecvPcsxInfo();
@@ -71,7 +84,14 @@ int RecvPcsxInfo();
 void trim(char *str);
 u16 calcCrc(u8 *d, int len);
 
+void emu_sync_state(void);
+
 #ifdef __cplusplus
 }
 #endif
 #endif
+
+#define ERROR_CPUOVERHEAT 20001
+#define ERROR_PCSXCRITICALERROR 90000
+
+#define STATUS_DIR "/tmp/PCSX/exitstatus/"

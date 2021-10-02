@@ -35,6 +35,8 @@ struct psx_gpu gpu;
 
 static noinline int do_cmd_buffer(uint32_t *data, int count);
 static void finish_vram_transfer(int is_read);
+static void do_bo(void);
+static void check_pmt_frame(void);
 
 static noinline void do_cmd_reset(void)
 {
@@ -45,6 +47,58 @@ static noinline void do_cmd_reset(void)
   if (unlikely(gpu.dma.h > 0))
     finish_vram_transfer(gpu.dma_start.is_read);
   gpu.dma.h = 0;
+}
+
+int g_gpu_patch_flag = 0;
+
+// double, for overdraw guard
+#define VRAM_SIZE (1024 * 512 * 2 * 2)
+#define GPU_PATCH_SCREEN_ADJUST (0x00000001)
+#define GPU_PATCH_ADD_VRAM2     (0x00000008)
+#define GPU_PATCH_ADD_BO        (0x00000020)
+#define GPU_PATCH_ARC_THE_LAD   (0x00000080)
+
+void GPUsetPatchFlag(int flag, int set) {
+  if(set)
+    g_gpu_patch_flag |= flag;
+  else
+    g_gpu_patch_flag &= ~flag;
+
+  if (g_gpu_patch_flag & GPU_PATCH_ADD_VRAM2 && gpu.vram2 == NULL) {
+    gpu.vram2 = gpu.mmap(VRAM_SIZE);
+    if (gpu.vram2 != NULL) {
+      gpu.vram2 += 4096 / 2;
+    }
+  }
+}
+
+static noinline int update_sw(int sw_in){
+  int sw = sw_in;
+
+  if (g_gpu_patch_flag & GPU_PATCH_IS_MR_DRILLER) {
+    if (gpu.screen.pck_rate == 0 || sw == 0) {
+      sw = gpu.screen.hres;
+    } else {
+      sw = sw / gpu.screen.pck_rate;
+    }
+    return sw;
+  }
+
+  if (sw <= 0 || sw >= 2560)
+    // full width
+    sw = gpu.screen.hres;
+  else
+    sw = sw * gpu.screen.hres / 2560;
+  return sw;
+}
+
+static noinline int update_sh(int sh_in){
+  int sh = sh_in;
+  if (gpu.status.dheight)
+    sh *= 2;
+  if (sh <= 0 || sh > gpu.screen.vres)
+    sh = gpu.screen.vres;
+  return sh;
 }
 
 static noinline void do_reset(void)
@@ -61,11 +115,47 @@ static noinline void do_reset(void)
   gpu.regs[3] = 1;
   gpu.screen.hres = gpu.screen.w = 256;
   gpu.screen.vres = gpu.screen.h = 240;
+  gpu.screen.w_regs = 0;
+  gpu.screen.h_regs = 0;
+  gpu.screen.pck_rate = 0;
 }
 
-static noinline void update_width(void)
+static noinline void update_width(int isHVcmd)
 {
+  if (g_gpu_patch_flag & GPU_PATCH_SCREEN_ADJUST) {
+    int data = gpu.regs[6];
+    gpu.screen.x1 = data & 0xfff;
+    gpu.screen.x2 = (data >> 12) & 0xfff;
+    int sw = update_sw(gpu.screen.x2 - gpu.screen.x1);
+    if(isHVcmd == 0) {
+      gpu.screen.w = sw;
+      return;
+    }
+
+    int diff = sw - update_sw(gpu.screen.w_cmd);
+    if (diff > 4 || diff < -4) {
+      gpu.screen.w = sw;
+      gpu.screen.w_regs = data;
+    }
+    else if (gpu.screen.w == sw) {
+      gpu.screen.w_regs = data;
+    }
+    gpu.regs[6] = gpu.screen.w_regs;
+    gpu.screen.w_cmd = gpu.screen.x2 - gpu.screen.x1;
+    return;
+  }
+
   int sw = gpu.screen.x2 - gpu.screen.x1;
+
+  if (g_gpu_patch_flag & GPU_PATCH_IS_MR_DRILLER) {
+    if (gpu.screen.pck_rate == 0 || sw == 0) {
+      gpu.screen.w = gpu.screen.hres;
+    } else {
+      gpu.screen.w = sw / gpu.screen.pck_rate;
+    }
+    return;
+  }
+
   if (sw <= 0 || sw >= 2560)
     // full width
     gpu.screen.w = gpu.screen.hres;
@@ -73,15 +163,40 @@ static noinline void update_width(void)
     gpu.screen.w = sw * gpu.screen.hres / 2560;
 }
 
-static noinline void update_height(void)
+static noinline void update_height(int isHVcmd)
 {
+  if (g_gpu_patch_flag & GPU_PATCH_SCREEN_ADJUST) {
+    int data = gpu.regs[7];
+    gpu.screen.y1 = data & 0x3ff;
+    gpu.screen.y2 = (data >> 10) & 0x3ff;
+    // TODO: emulate this properly..
+    int sh = update_sh(gpu.screen.y2 - gpu.screen.y1);
+    if(isHVcmd == 0) {
+      gpu.screen.h = sh;
+      return;
+    }
+
+    int diff = sh - update_sh(gpu.screen.h_cmd);
+    if (diff > 4 || diff < -4 || gpu.screen.region_change == 1) {
+      gpu.screen.h = sh;
+      gpu.screen.h_regs = data;
+      if (diff == 0)
+        gpu.screen.region_change = 0;
+    }
+    else if (gpu.screen.h == sh) {
+      gpu.screen.h_regs = data;
+    }
+    gpu.regs[7] = gpu.screen.h_regs;
+    gpu.screen.h_cmd = gpu.screen.y2 - gpu.screen.y1;
+    return;
+  }
+
   // TODO: emulate this properly..
   int sh = gpu.screen.y2 - gpu.screen.y1;
   if (gpu.status.dheight)
     sh *= 2;
   if (sh <= 0 || sh > gpu.screen.vres)
     sh = gpu.screen.vres;
-
   gpu.screen.h = sh;
 }
 
@@ -141,9 +256,6 @@ static noinline void get_gpu_info(uint32_t data)
   }
 }
 
-// double, for overdraw guard
-#define VRAM_SIZE (1024 * 512 * 2 * 2)
-
 static int map_vram(void)
 {
   gpu.vram = gpu.mmap(VRAM_SIZE);
@@ -188,13 +300,31 @@ long GPUshutdown(void)
   }
   gpu.vram = NULL;
 
+  if (g_gpu_patch_flag & GPU_PATCH_ADD_VRAM2) {
+    if (gpu.vram2 != NULL) {
+      gpu.vram2 -= 4096 / 2;
+      gpu.munmap(gpu.vram2, VRAM_SIZE);
+    }
+    gpu.vram2 = NULL;
+  }
+
   return ret;
 }
 
 void GPUwriteStatus(uint32_t data)
 {
-  static const short hres[8] = { 256, 368, 320, 384, 512, 512, 640, 640 };
-  static const short vres[4] = { 240, 480, 256, 480 };
+  static const short hres[2][4] = {
+    { 256, 320, 512, 640 }, // HDS2 = 0
+    { 368, 384, 384, 384 }  // HDS2 = 1
+  };
+  static const short vres[2][2] = {
+    { 240, 480 }, // NTSC
+    { 288, 576 }  // PAL
+  };
+  static const short pck_rate[2][4] = {
+    { 10, 8, 5, 4 }, // HDS2 = 0
+    {  7, 7, 7, 7 }  // HDS2 = 1
+  };
   uint32_t cmd = data >> 24;
 
   if (cmd < ARRAY_SIZE(gpu.regs)) {
@@ -204,6 +334,7 @@ void GPUwriteStatus(uint32_t data)
   }
 
   gpu.state.fb_dirty = 1;
+  int video = gpu.status.video;
 
   switch (cmd) {
     case 0x00:
@@ -232,19 +363,31 @@ void GPUwriteStatus(uint32_t data)
     case 0x06:
       gpu.screen.x1 = data & 0xfff;
       gpu.screen.x2 = (data >> 12) & 0xfff;
-      update_width();
+      update_width(1);
       break;
     case 0x07:
       gpu.screen.y1 = data & 0x3ff;
       gpu.screen.y2 = (data >> 10) & 0x3ff;
-      update_height();
+      update_height(1);
       break;
     case 0x08:
       gpu.status.reg = (gpu.status.reg & ~0x7f0000) | ((data & 0x3F) << 17) | ((data & 0x40) << 10);
-      gpu.screen.hres = hres[(gpu.status.reg >> 16) & 7];
-      gpu.screen.vres = vres[(gpu.status.reg >> 19) & 3];
-      update_width();
-      update_height();
+      gpu.screen.hres = hres[gpu.status.width1][gpu.status.width0];
+      gpu.screen.vres = vres[gpu.status.video][gpu.status.dheight];
+
+      if (g_gpu_patch_flag & GPU_PATCH_IS_MR_DRILLER) {
+        if (gpu.screen.hres == 368) gpu.screen.hres = 384;
+        if (!gpu.status.interlace && gpu.status.dheight) {
+          // VGA non-interlace
+          gpu.screen.pck_rate = 2;
+        } else {
+          gpu.screen.pck_rate = pck_rate[gpu.status.width1][gpu.status.width0];
+        }
+      }
+
+      if (video != gpu.status.video) gpu.screen.region_change = 1;
+      update_width(0);
+      update_height(0);
       renderer_notify_res_change();
       break;
     default:
@@ -461,6 +604,12 @@ static noinline int do_cmd_buffer(uint32_t *data, int count)
       start_vram_transfer(data[pos + 1], data[pos + 2], (cmd & 0xe0) == 0xc0);
       pos += 3;
       continue;
+    } else {
+      if ((g_gpu_patch_flag & GPU_PATCH_IS_FF7) ||
+          (g_gpu_patch_flag & GPU_PATCH_IS_MR_DRILLER)) {
+        gpu.frameskip.frame_ready = 1;
+        gpu.frameskip.active = 0;
+      }
     }
 
     // 0xex cmds might affect frameskip.allow, so pass to do_cmd_list_skip
@@ -575,6 +724,11 @@ long GPUdmaChain(uint32_t *rambase, uint32_t start_addr)
     }
   }
 
+  if (g_gpu_patch_flag & GPU_PATCH_ADD_BO) {
+     check_pmt_frame();
+     do_bo();
+  }
+
   gpu.state.last_list.frame = *gpu.state.frame_count;
   gpu.state.last_list.hcnt = *gpu.state.hcnt;
   gpu.state.last_list.cycles = cpu_cycles;
@@ -625,6 +779,8 @@ struct GPUFreeze
 {
   uint32_t ulFreezeVersion;      // should be always 1 for now (set by main emu)
   uint32_t ulStatus;             // current gpu status
+  uint32_t ulEventStatus;        // event status
+  uint32_t ulEventCnt;           // event count
   uint32_t ulControl[256];       // latest control register values
   unsigned char psxVRam[1024*1024*2]; // current VRam image (full 2 MB for ZN)
 };
@@ -639,8 +795,14 @@ long GPUfreeze(uint32_t type, struct GPUFreeze *freeze)
         flush_cmd_buffer();
       memcpy(freeze->psxVRam, gpu.vram, 1024 * 512 * 2);
       memcpy(freeze->ulControl, gpu.regs, sizeof(gpu.regs));
+      if (g_gpu_patch_flag & GPU_PATCH_SCREEN_ADJUST) {
+        memcpy(freeze->ulControl + sizeof(gpu.regs), (unsigned char*)&gpu.screen.w_cmd, sizeof(int));
+        memcpy(freeze->ulControl + sizeof(gpu.regs) + sizeof(int), (unsigned char*)&gpu.screen.h_cmd, sizeof(int));
+      }
       memcpy(freeze->ulControl + 0xe0, gpu.ex_regs, sizeof(gpu.ex_regs));
       freeze->ulStatus = gpu.status.reg;
+      freeze->ulEventStatus = gpu.state.bo_processing;
+      freeze->ulEventCnt = gpu.state.bo_cnt;
       break;
     case 0: // load
       memcpy(gpu.vram, freeze->psxVRam, 1024 * 512 * 2);
@@ -648,9 +810,15 @@ long GPUfreeze(uint32_t type, struct GPUFreeze *freeze)
       memcpy(gpu.ex_regs, freeze->ulControl + 0xe0, sizeof(gpu.ex_regs));
       gpu.status.reg = freeze->ulStatus;
       gpu.cmd_len = 0;
+      gpu.state.bo_processing = freeze->ulEventStatus;
+      gpu.state.bo_cnt = freeze->ulEventCnt;
       for (i = 8; i > 0; i--) {
         gpu.regs[i] ^= 1; // avoid reg change detection
         GPUwriteStatus((i << 24) | (gpu.regs[i] ^ 1));
+      }
+      if (g_gpu_patch_flag & GPU_PATCH_SCREEN_ADJUST) {
+        memcpy((unsigned char*)&gpu.screen.w_cmd, freeze->ulControl + sizeof(gpu.regs), sizeof(int));
+        memcpy((unsigned char*)&gpu.screen.h_cmd, freeze->ulControl + sizeof(gpu.regs) + sizeof(int), sizeof(int));
       }
       renderer_sync_ecmds(gpu.ex_regs);
       renderer_update_caches(0, 0, 1024, 512);
@@ -660,6 +828,7 @@ long GPUfreeze(uint32_t type, struct GPUFreeze *freeze)
   return 1;
 }
 
+static int frame_cnt = 0;
 void GPUupdateLace(void)
 {
   if (gpu.cmd_len > 0)
@@ -686,7 +855,23 @@ void GPUupdateLace(void)
     }
     gpu.frameskip.frame_ready = 0;
   }
+  if (gpu.state.skip_frame && g_gpu_patch_flag & GPU_PATCH_ADD_VRAM2) {
+    gpu.state.skip_frame = 0;
+    gpu.state.fb_dirty = 0;
+    gpu.state.blanked = 0;
+    return;
+  }
 
+  if ((g_gpu_patch_flag & GPU_PATCH_IS_MR_DRILLER) ||
+      (g_gpu_patch_flag & GPU_PATCH_ARC_THE_LAD)) {
+    if (frame_cnt >= 59) {
+      gpu.state.fb_dirty = 0;
+      gpu.state.blanked = 0;
+      frame_cnt = 0;
+      return;
+    }
+    frame_cnt++;
+  }
   vout_update();
   gpu.state.fb_dirty = 0;
   gpu.state.blanked = 0;
@@ -717,6 +902,7 @@ void GPUvBlank(int is_vblank, int lcf)
 
 void GPUrearmedCallbacks(const struct rearmed_cbs *cbs)
 {
+  gpu.state.bo_trigger = &cbs->gpu_unai.lineskip;
   gpu.frameskip.set = cbs->frameskip;
   gpu.frameskip.advice = &cbs->fskip_advice;
   gpu.frameskip.active = 0;
@@ -737,6 +923,287 @@ void GPUrearmedCallbacks(const struct rearmed_cbs *cbs)
     cbs->pl_vout_set_raw_vram(gpu.vram);
   renderer_set_config(cbs);
   vout_set_config(cbs);
+}
+
+uint32_t GPUboStatus(void) {
+  uint32_t ret = 0;
+
+  if (g_gpu_patch_flag & GPU_PATCH_ADD_BO) {
+    ret = gpu.state.bo_processing;
+  }
+
+  return ret;
+}
+
+static void check_pmt_frame(void) {
+  if (!gpu.state.bo && gpu.state.last_pmt_show && !gpu.state.pmt_show) {
+    gpu.state.bo = 1;
+  }
+  else if (gpu.state.bo && !gpu.state.last_pmt_show && gpu.state.pmt_show) {
+    gpu.state.bo = 0;
+  }
+  gpu.state.last_pmt_show = gpu.state.pmt_show;
+  gpu.state.dma_chain = 1;
+}
+
+static void wo(void){
+
+    uint32_t data[12];
+    int cmd, pos;
+
+    if((gpu.state.bo_processing == 1) || (gpu.state.bo_processing == 2) ){
+
+       cmd = 0xe3;
+       pos = 6;
+       data[0]=0xe3000140;
+       data[1]=0xe4037e7f;
+       data[2]=0xe5000140;
+       data[3]=0xe1000200;
+       data[4]=0xe2000000;
+       data[5]=0xe6000000;
+       do_cmd_list(data, pos, &cmd);
+
+       cmd = 0x28;
+       pos = 5;
+       data[0]=0x28ffffff;
+       data[1]=0x00000000;
+       data[2]=0x00000140;
+       data[3]=0x00e00000;
+       data[4]=0x00e00140;
+       do_cmd_list(data, pos, &cmd);
+
+       cmd = 0xe3;
+       pos = 6;
+       data[0]=0xe3000140;
+       data[1]=0xe4037e7f;
+       data[2]=0xe5000140;
+       data[3]=0xe100021f;
+       data[4]=0xe2000000;
+       data[5]=0xe6000000;
+       do_cmd_list(data, pos, &cmd);
+    }
+}
+
+static void small_bh(int count){
+
+    uint32_t data[12];
+    int cmd, pos;
+
+    if((gpu.state.bo_processing == 1) || (gpu.state.bo_processing == 2) ){
+
+        cmd = 0xe3;
+        pos = 6;
+        if((count & 0x1) == 0){
+            data[0]=0xe3000140;
+            data[1]=0xe4037e7f;
+            data[2]=0xe5000140;
+            data[3]=0xe1000200;
+            data[4]=0xe2000000;
+            data[5]=0xe6000000;
+          }
+          else{
+            data[0]=0xe3000000;
+            data[1]=0xe4037d3f;
+            data[2]=0xe5000000;
+            data[3]=0xe1000200;
+            data[4]=0xe2000000;
+            data[5]=0xe6000000;
+          }
+        do_cmd_list(data, pos, &cmd);
+
+        cmd = 0x28;
+
+        pos = 5;
+        data[0]=0x28000000;
+        data[1]=0x00000000;
+        data[2]=0x00000140;
+        data[3]=0x00e00000;
+        data[4]=0x00e00140;
+        do_cmd_list(data, pos, &cmd);
+
+        cmd = 0x2c;
+        pos = 9;
+        if(gpu.state.bo_processing == 1){
+            data[0]=0x2c808080;
+            data[1]=0x00080104;
+            data[2]=0x003c70ac;
+            data[3]=0x00080128;
+            data[4]=0x001470f3;
+            data[5]=0x00180104;
+            data[6]=0x00008fac;
+            data[7]=0x00180128;
+            data[8]=0x00008ff3;
+        }
+        else{
+            data[0]=0x2c808080;
+            data[1]=0x000800fc;
+            data[2]=0x003c0ec4;
+            data[3]=0x00080138;
+            data[4]=0x00130eff;
+            data[5]=0x001600fc;
+            data[6]=0x00001bc4;
+            data[7]=0x00160138;
+            data[8]=0x00001bff;
+        }
+
+        do_cmd_list(data, pos, &cmd);
+
+        cmd = 0xe3;
+        pos = 6;
+        if((count & 0x1) == 0){
+            data[0]=0xe3000140;
+            data[1]=0xe4037e7f;
+            data[2]=0xe5000140;
+            data[3]=0xe100021f;
+            data[4]=0xe2000000;
+            data[5]=0xe6000000;
+        }
+        else{
+            data[0]=0xe3000000;
+            data[1]=0xe4037d3f;
+            data[2]=0xe5000000;
+            data[3]=0xe100021f;
+            data[4]=0xe2000000;
+            data[5]=0xe6000000;
+        }
+        do_cmd_list(data, pos, &cmd);
+    }
+}
+
+static void big_bh(int count){
+
+    uint32_t data[12];
+    int cmd, pos;
+
+    if((gpu.state.bo_processing == 1) || (gpu.state.bo_processing == 2) ){
+
+        cmd = 0xe3;
+        pos = 6;
+        if((count & 0x1) == 0){
+            data[0]=0xe3000140;
+            data[1]=0xe4037e7f;
+            data[2]=0xe5000140;
+            data[3]=0xe1000200;
+            data[4]=0xe2000000;
+            data[5]=0xe6000000;
+        }
+        else{
+            data[0]=0xe3000000;
+            data[1]=0xe4037d3f;
+            data[2]=0xe5000000;
+            data[3]=0xe1000200;
+            data[4]=0xe2000000;
+            data[5]=0xe6000000;
+        }
+        do_cmd_list(data, pos, &cmd);
+
+       cmd = 0x28;
+       pos = 5;
+       data[0]=0x28000000;
+       data[1]=0x00000000;
+       data[2]=0x00000140;
+       data[3]=0x00e00000;
+       data[4]=0x00e00140;
+       do_cmd_list(data, pos, &cmd);
+
+       cmd = 0x2c;
+       pos = 9;
+       if(gpu.state.bo_processing == 1){
+           data[0]=0x2c808080;
+           data[1]=0x000800e0;
+           data[2]=0x003c70ac;
+           data[3]=0x00080128;
+           data[4]=0x001470f3;
+           data[5]=0x002800e0;
+           data[6]=0x00008fac;
+           data[7]=0x00280128;
+           data[8]=0x00008ff3;
+       }
+       else{
+           data[0]=0x2c808080;
+           data[1]=0x000800c0;
+           data[2]=0x007ce020;
+           data[3]=0x00080138;
+           data[4]=0x0011e097;
+           data[5]=0x002400c0;
+           data[6]=0x0000fb20;
+           data[7]=0x00240138;
+           data[8]=0x0000fb97;
+       }
+       do_cmd_list(data, pos, &cmd);
+
+       cmd = 0xe3;
+       pos = 6;
+       if((count & 0x1) == 0){
+           data[0]=0xe3000140;
+           data[1]=0xe4037e7f;
+           data[2]=0xe5000140;
+           data[3]=0xe100021f;
+           data[4]=0xe2000000;
+           data[5]=0xe6000000;
+       }
+       else{
+           data[0]=0xe3000000;
+           data[1]=0xe4037d3f;
+           data[2]=0xe5000000;
+           data[3]=0xe1000200;
+           data[4]=0xe2000000;
+           data[5]=0xe6000000;
+       }
+       do_cmd_list(data, pos, &cmd);
+    }
+}
+
+#define DO_CANCEL 0x80000000
+static void do_bo(void){
+
+    if((((*gpu.state.bo_trigger) & DO_CANCEL) == DO_CANCEL) && (gpu.state.bo_cnt < 18)){
+      gpu.state.bo_processing = 0;
+      gpu.state.bo_cnt = 0;
+      return;
+    }
+
+    if( gpu.state.pmt_show  == 1 ){
+      if(!gpu.state.bo_processing){
+          gpu.state.bo_processing = 0xf & (*gpu.state.bo_trigger);
+      }
+    }
+
+    if(gpu.state.bo_processing){
+
+      if(gpu.state.bo_cnt < 18){
+        ; //nop
+      }
+      else if(gpu.state.bo_cnt == 18){
+        wo();
+      }
+      else if(gpu.state.bo_cnt < 60+18){
+        big_bh(gpu.state.bo_cnt);
+      }
+      else if(gpu.state.bo_cnt < 240+36){
+
+        if(gpu.state.pmt_show == 1){
+          wo();
+          gpu.state.bo_processing = 8;
+        }
+        else{
+          small_bh(gpu.state.bo_cnt);
+        }
+      }
+      else if(gpu.state.bo_cnt == 240+36){
+        wo();
+      }
+      else{
+        gpu.state.bo_processing = 8;
+      }
+
+      if((gpu.state.bo_processing == 8)&&(*gpu.state.bo_trigger == 0)) gpu.state.bo_processing=0;
+
+      gpu.state.bo_cnt++;
+    }
+    else{
+      if(gpu.state.bo_cnt) gpu.state.bo_cnt = 0;
+    }
 }
 
 // vim:shiftwidth=2:expandtab

@@ -7163,15 +7163,19 @@ static int addr_cmp(const void *p1_, const void *p2_)
   return p1->addr - p2->addr;
 }
 
+static struct savestate_block tmp_blocks[1024];
+
 int new_dynarec_save_blocks(void *save, int size)
 {
   struct savestate_block *blocks = save;
   int maxcount = size / sizeof(blocks[0]);
-  struct savestate_block tmp_blocks[1024];
   struct ll_entry *head;
   int p, s, d, o, bcnt;
   u_int addr;
 
+  if(!(save)) {
+    return maxcount * sizeof(blocks[0]);
+  }
   o = 0;
   for (p = 0; p < sizeof(jump_in) / sizeof(jump_in[0]); p++) {
     bcnt = 0;

@@ -19,6 +19,7 @@
  ***************************************************************************/
 
 #include "mdec.h"
+#include "title.h"
 
 /* memory speed is 1 byte per MDEC_BIAS psx clock
  * That mean (PSXCLK / MDEC_BIAS) B/s
@@ -621,9 +622,15 @@ void psxDma1(u32 adr, u32 bcr, u32 chcr) {
 			mdec.block_buffer_pos = mdec.block_buffer + size;
 		}
 	}
-	
+
 	/* define the power of mdec */
-	MDECOUTDMA_INT(words * MDEC_BIAS);
+	if (isTitleName(RIDGE_RACER_TYPE_4_EU)
+           || isTitleName(RIDGE_RACER_TYPE_4_JP)
+           || isTitleName(RIDGE_RACER_TYPE_4_US)) {
+		MDECOUTDMA_INT(words * 3.5);
+	} else {
+		MDECOUTDMA_INT(words * MDEC_BIAS);
+	}
 	}
 }
 
@@ -673,29 +680,81 @@ int mdecFreeze(void *f, int Mode) {
 	u8 *base = (u8 *)&psxM[0x100000];
 	u32 v;
 
-	gzfreeze(&mdec.reg0, sizeof(mdec.reg0));
-	gzfreeze(&mdec.reg1, sizeof(mdec.reg1));
+	if(Mode == 2) {
+		int iRetSize = sizeof(mdec.reg0) \
+		  + sizeof(mdec.reg1)		 \
+		  + sizeof(v)			 \
+		  + sizeof(v)			 \
+		  + sizeof(v)			 \
+		  + sizeof(mdec.block_buffer)	 \
+		  + sizeof(mdec.pending_dma1)	 \
+		  + sizeof(iq_y)		 \
+		  + sizeof(iq_uv);
 
-	// old code used to save raw pointers..
-	v = (u8 *)mdec.rl - base;
-	gzfreeze(&v, sizeof(v));
-	mdec.rl = (u16 *)(base + (v & 0xffffe));
-	v = (u8 *)mdec.rl_end - base;
-	gzfreeze(&v, sizeof(v));
-	mdec.rl_end = (u16 *)(base + (v & 0xffffe));
-
-	v = 0;
-	if (mdec.block_buffer_pos)
-		v = mdec.block_buffer_pos - base;
-	gzfreeze(&v, sizeof(v));
-	mdec.block_buffer_pos = 0;
-	if (v)
-		mdec.block_buffer_pos = base + (v & 0xfffff);
-
-	gzfreeze(&mdec.block_buffer, sizeof(mdec.block_buffer));
-	gzfreeze(&mdec.pending_dma1, sizeof(mdec.pending_dma1));
-	gzfreeze(iq_y, sizeof(iq_y));
-	gzfreeze(iq_uv, sizeof(iq_uv));
-
-	return 0;
+		if(f) {
+			memcpy(f, &mdec.reg0, sizeof(mdec.reg0));
+			f = (void *)((char *)f + sizeof(mdec.reg0));
+			
+			memcpy(f, &mdec.reg1, sizeof(mdec.reg1));
+			f = (void *)((char *)f + sizeof(mdec.reg1));
+			
+			// old code used to save raw pointers..
+			v = (u8 *)mdec.rl - base;
+			memcpy(f, &v, sizeof(v));
+			f = (void *)((char *)f + sizeof(v));
+			
+			v = (u8 *)mdec.rl_end - base;
+			memcpy(f, &v, sizeof(v));
+			f = (void *)((char *)f + sizeof(v));
+			
+			v = 0;
+			if (mdec.block_buffer_pos)
+			  v = mdec.block_buffer_pos - base;
+			memcpy(f, &v, sizeof(v));
+			f = (void *)((char *)f + sizeof(v));
+			
+			mdec.block_buffer_pos = 0;
+			if (v)
+			  mdec.block_buffer_pos = base + (v & 0xfffff);
+			
+			memcpy(f, &mdec.block_buffer, sizeof(mdec.block_buffer));
+			f = (void *)((char *)f + sizeof(mdec.block_buffer));
+			
+			memcpy(f, &mdec.pending_dma1, sizeof(mdec.pending_dma1));
+			f = (void *)((char *)f + sizeof(mdec.pending_dma1));
+			
+			memcpy(f, iq_y, sizeof(iq_y));
+			f = (void *)((char *)f + sizeof(iq_y));
+			
+			memcpy(f, iq_uv, sizeof(iq_uv));
+			f = (void *)((char *)f + sizeof(iq_uv));
+		}
+		return iRetSize;
+	} else {
+		gzfreeze(&mdec.reg0, sizeof(mdec.reg0));
+		gzfreeze(&mdec.reg1, sizeof(mdec.reg1));
+		
+		// old code used to save raw pointers..
+		v = (u8 *)mdec.rl - base;
+		gzfreeze(&v, sizeof(v));
+		mdec.rl = (u16 *)(base + (v & 0xffffe));
+		v = (u8 *)mdec.rl_end - base;
+		gzfreeze(&v, sizeof(v));
+		mdec.rl_end = (u16 *)(base + (v & 0xffffe));
+		
+		v = 0;
+		if (mdec.block_buffer_pos)
+		  v = mdec.block_buffer_pos - base;
+		gzfreeze(&v, sizeof(v));
+		mdec.block_buffer_pos = 0;
+		if (v)
+		  mdec.block_buffer_pos = base + (v & 0xfffff);
+		
+		gzfreeze(&mdec.block_buffer, sizeof(mdec.block_buffer));
+		gzfreeze(&mdec.pending_dma1, sizeof(mdec.pending_dma1));
+		gzfreeze(iq_y, sizeof(iq_y));
+		gzfreeze(iq_uv, sizeof(iq_uv));
+		
+		return 0;
+	}
 }

@@ -1076,6 +1076,8 @@ typedef struct GPUFREEZETAG
 {
  uint32_t ulFreezeVersion;      // should be always 1 for now (set by main emu)
  uint32_t ulStatus;             // current gpu status
+ uint32_t ulEventStatus;        // event status
+ uint32_t ulEventCnt;           // event count
  uint32_t ulControl[256];       // latest control register values
  unsigned char psxVRam[1024*1024*2]; // current VRam image (full 2 MB for ZN)
 } GPUFreeze_t;
@@ -1139,6 +1141,8 @@ void GPUrearmedCallbacks(const struct rearmed_cbs *cbs)
  UseFrameSkip = cbs->frameskip;
  iUseDither = cbs->gpu_peops.iUseDither;
  dwActFixes = cbs->gpu_peops.dwActFixes;
+ scenes = &cbs->gpu_peops.scenes;
+
  fFrameRateHz = cbs->gpu_peops.fFrameRateHz;
  dwFrameRateTicks = cbs->gpu_peops.dwFrameRateTicks;
  if (cbs->pl_vout_set_raw_vram)

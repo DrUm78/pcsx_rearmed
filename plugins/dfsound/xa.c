@@ -18,9 +18,14 @@
 #include "stdafx.h"
 #define _IN_XA
 #include <stdint.h>
+#include "../../libpcsxcore/title.h"
+
+#include "../libpcsxcore/title.h"
 
 // will be included from spu.c
 #ifdef _IN_SPU
+
+extern int isTitleName(enum TITLE_NAME argTitleName);
 
 ////////////////////////////////////////////////////////////////////////
 // XA GLOBALS
@@ -112,13 +117,45 @@ INLINE void FeedXA(xa_decode_t *xap)
  if(!spu.bSPUIsOpen) return;
 
  spu.xapGlobal = xap;                                  // store info for save states
- spu.XARepeat  = 100;                                  // set up repeat
 
-#if 0//def XA_HACK
- iSize=((45500*xap->nsamples)/xap->freq);              // get size
-#else
- iSize=((44100*xap->nsamples)/xap->freq);              // get size
-#endif
+ if(isTitleName(JUMPING_FLASH_EU) ||
+	isTitleName(GRADIUS_GAIDEN_JP) ||
+        isTitleName(JUMPING_FLASH_JP) ||
+        isTitleName(JUMPING_FLASH_US) ||
+        isTitleName(KAGERO_JP) ||
+        isTitleName(MEDIEVIL_EU) ||
+        isTitleName(MEDIEVIL_US) ||
+        isTitleName(RESIDENT_EVIL_EU) ||
+        isTitleName(RESIDENT_EVIL_JP) ||
+        isTitleName(RESIDENT_EVIL_US) ||
+        isTitleName(STREET_FIGHTER_EX_PLUS_EU) ||
+        isTitleName(STREET_FIGHTER_EX_PLUS_JP) ||
+        isTitleName(STREET_FIGHTER_EX_PLUS_US) ||
+        isTitleName(TEKKEN3_EU) ||
+        isTitleName(TEKKEN3_JP) ||
+        isTitleName(XEVIOUS_3D_G_JP) ||
+        isTitleName(XEVIOUS_3D_G_US)) {
+        spu.XARepeat  = 0;                                  // set up repeat
+ } else {
+        spu.XARepeat  = 100;                                // set up repeat
+ }
+
+ if(isTitleName(MEGA_MAM_LEGENDS_EU) ||
+        isTitleName(MEGA_MAM_LEGENDS_JP) ||
+        isTitleName(MEGA_MAM_LEGENDS_US) ) {
+   if(xap->stereo){
+     iSize=((44100*xap->nsamples)/xap->freq);              // get size
+   } else {
+     iSize=((45500*xap->nsamples)/xap->freq);              // get size
+   }
+ } else {
+   #if 0//def XA_HACK
+     iSize=((45500*xap->nsamples)/xap->freq);              // get size
+   #else
+     iSize=((44100*xap->nsamples)/xap->freq);              // get size
+   #endif
+ }
+
  if(!iSize) return;                                    // none? bye
 
  if(spu.XAFeed<spu.XAPlay) iPlace=spu.XAPlay-spu.XAFeed; // how much space in my buf?

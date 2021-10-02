@@ -39,7 +39,8 @@ static int alsa_init(void)
  int format;
  unsigned int buffer_time = 100000;
  unsigned int period_time = buffer_time / 4;
- const char *alsa_name = "default";
+ // const char *alsa_name = "default";
+ const char *alsa_name = "plughw:0,2";
  const char *name;
  int retval = -1;
  int err;

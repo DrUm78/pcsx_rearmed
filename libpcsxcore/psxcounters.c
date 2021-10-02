@@ -24,6 +24,8 @@
 #include "psxcounters.h"
 #include "gpu.h"
 #include "debug.h"
+#include "../libpcsxcore/title.h"
+int isTitleName(enum TITLE_NAME argTitleName);
 
 /******************************************************************************/
 
@@ -60,7 +62,7 @@ static const u32 CountToOverflow  = 0;
 static const u32 CountToTarget    = 1;
 
 static const u32 FrameRate[]      = { 60, 50 };
-static const u32 HSyncTotal[]     = { 263, 313 };
+static u32 HSyncTotal[]           = { 263, 313 };
 #define VBlankStart 240
 
 #define VERBOSE_LEVEL 0
@@ -78,6 +80,19 @@ static u32 base_cycle = 0;
 u32 psxNextCounter = 0, psxNextsCounter = 0;
 
 /******************************************************************************/
+
+#define HSYNC_ADJUSTED 297
+void change_HSync_Motionjpeg(int onoff){
+
+	if(onoff)
+	{
+		HSyncTotal[0] = 263;
+	}
+	else
+	{
+		HSyncTotal[0] = HSYNC_ADJUSTED;
+	}
+}
 
 static inline
 void setIrq( u32 irq )
@@ -458,6 +473,16 @@ void psxRcntInit()
 {
     s32 i;
 
+    if(isTitleName(METAL_GEAR_SOLID_DISC_1_JP)  ||
+        isTitleName(METAL_GEAR_SOLID_DISC_2_JP) ||
+        isTitleName(METAL_GEAR_SOLID_DISC_1_US) ||
+        isTitleName(METAL_GEAR_SOLID_DISC_2_US)){
+        HSyncTotal[0] = HSYNC_ADJUSTED;
+    }
+    else if(isTitleName(SAGAFRONTIER_JP)){
+        HSyncTotal[0] = 290;
+    }
+
     // rcnt 0.
     rcnts[0].rate   = 1;
     rcnts[0].irq    = 0x10;
@@ -494,28 +519,54 @@ s32 psxRcntFreeze( void *f, s32 Mode )
     u32 count;
     s32 i;
 
-    gzfreeze( &rcnts, sizeof(rcnts) );
-    gzfreeze( &hSyncCount, sizeof(hSyncCount) );
-    gzfreeze( &spuSyncCount, sizeof(spuSyncCount) );
-    gzfreeze( &psxNextCounter, sizeof(psxNextCounter) );
-    gzfreeze( &psxNextsCounter, sizeof(psxNextsCounter) );
+    if(Mode == 2) {
+    	int iRetSize = sizeof(rcnts)			\
+	  + sizeof(hSyncCount)				\
+	  + sizeof(spuSyncCount)			\
+	  + sizeof(psxNextCounter)			\
+	  + sizeof(psxNextsCounter);
+	
+    	if(f) {
+		memcpy(f, &rcnts, sizeof(rcnts) );
+		f = (void *)((char *)f + sizeof(rcnts));
+		
+		memcpy(f, &hSyncCount, sizeof(hSyncCount) );
+		f = (void *)((char *)f + sizeof(hSyncCount));
+		
+		memcpy(f, &spuSyncCount, sizeof(spuSyncCount) );
+		f = (void *)((char *)f + sizeof(spuSyncCount));
+		
+		memcpy(f, &psxNextCounter, sizeof(psxNextCounter) );
+		f = (void *)((char *)f + sizeof(psxNextCounter));
 
-    if (Mode == 0)
-    {
-        // don't trust things from a savestate
-        for( i = 0; i < CounterQuantity; ++i )
-        {
-            _psxRcntWmode( i, rcnts[i].mode );
-            count = (psxRegs.cycle - rcnts[i].cycleStart) / rcnts[i].rate;
-            _psxRcntWcount( i, count );
-        }
-        hsync_steps = (psxRegs.cycle - rcnts[3].cycleStart) / rcnts[3].target;
-        psxRcntSet();
-
-        base_cycle = 0;
+		memcpy(f, &psxNextsCounter, sizeof(psxNextsCounter) );
+		f = (void *)((char *)f + sizeof(psxNextsCounter));
+	}
+	return iRetSize;
+    } else {
+    	gzfreeze( &rcnts, sizeof(rcnts) );
+	gzfreeze( &hSyncCount, sizeof(hSyncCount) );
+	gzfreeze( &spuSyncCount, sizeof(spuSyncCount) );
+	gzfreeze( &psxNextCounter, sizeof(psxNextCounter) );
+	gzfreeze( &psxNextsCounter, sizeof(psxNextsCounter) );
+	
+	if (Mode == 0)
+	    {
+	        // don't trust things from a savestate
+	        for( i = 0; i < CounterQuantity; ++i )
+		    {
+		        _psxRcntWmode( i, rcnts[i].mode );
+			count = (psxRegs.cycle - rcnts[i].cycleStart) / rcnts[i].rate;
+			_psxRcntWcount( i, count );
+		    }
+		hsync_steps = (psxRegs.cycle - rcnts[3].cycleStart) / rcnts[3].target;
+		psxRcntSet();
+	    
+		base_cycle = 0;
+	    }
+	
+	return 0;
     }
-
-    return 0;
 }
 
 /******************************************************************************/

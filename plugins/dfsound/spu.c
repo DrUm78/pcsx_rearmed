@@ -35,6 +35,8 @@
 #include "arm_features.h"
 #endif
 
+#include "../../libpcsxcore/title.h"
+
 #ifdef HAVE_ARMV7
  #define ssat32_to_16(v) \
   asm("ssat %0,#16,%1" : "=r" (v) : "r" (v))
@@ -75,9 +77,13 @@ SPUConfig       spu_config;
 
 static int iFMod[NSSIZE];
 static int RVB[NSSIZE * 2];
+static int isRvbConfigEnabled = 0;
 int ChanBuf[NSSIZE];
 
 #define CDDA_BUFFER_SIZE (16384 * sizeof(uint32_t)) // must be power of 2
+
+void detect_pi(int ch, int ns_to);
+void set_bo_trg(int onoff, int ch);
 
 ////////////////////////////////////////////////////////////////////////
 // CODE AREA
@@ -250,6 +256,14 @@ static void StartSoundMain(int ch)
  spu.dwNewChannel&=~(1<<ch);                           // clear new channel bit
  spu.dwChannelOn|=1<<ch;
  spu.dwChannelDead&=~(1<<ch);
+
+ if ((isTitleName(SUIKODEN_EU) ||
+      isTitleName(SUIKODEN_JP) ||
+      isTitleName(SUIKODEN_US))&&
+      ch == 0x15)
+ {
+      s_chan->ADSRX.SustainIncrease = 1;
+ }
 }
 
 static void StartSound(int ch)
@@ -569,8 +583,8 @@ static noinline int do_samples_##name( \
     sinc = FModChangeFrequency(SB, spu.s_chan[ch].iRawPitch, ns)
 
 make_do_samples(default, fmod_recv_check, ,
-  StoreInterpolationVal(SB, sinc, fa, spu.s_chan[ch].bFMod==2),
-  ChanBuf[ns] = iGetInterpolationVal(SB, sinc, *spos, spu.s_chan[ch].bFMod==2), )
+  StoreInterpolationVal(SB, sinc, fa, spu.s_chan[ch].bFMod==2 && spu.s_chan[ch].iLeftVolume==0 && spu.s_chan[ch].iRightVolume==0),
+  ChanBuf[ns] = iGetInterpolationVal(SB, sinc, *spos, spu.s_chan[ch].bFMod==2 && spu.s_chan[ch].iLeftVolume==0 && spu.s_chan[ch].iRightVolume==0), )
 make_do_samples(noint, , fa = SB[29], , ChanBuf[ns] = fa, SB[29] = fa)
 
 #define simple_interp_store \
@@ -785,7 +799,7 @@ static void do_channels(int ns_to)
 
    if (s_chan->bNoise)
     d = do_samples_noise(ch, ns_to);
-   else if (s_chan->bFMod == 2
+   else if ((s_chan->bFMod == 2 && s_chan->iLeftVolume == 0 && s_chan->iRightVolume == 0)
          || (s_chan->bFMod == 0 && spu_config.iUseInterpolation == 0))
     d = do_samples_noint(decode_block, NULL, ch, ns_to,
           SB, sinc, &s_chan->spos, &s_chan->iSBPos);
@@ -809,8 +823,9 @@ static void do_channels(int ns_to)
      spu.decode_dirty_ch |= 1 << ch;
     }
 
-   if (s_chan->bFMod == 2)                         // fmod freq channel
-    memcpy(iFMod, &ChanBuf, ns_to * sizeof(iFMod[0]));
+   if (s_chan->bFMod == 2) {                       // fmod freq channel
+    memcpy(iFMod, ChanBuf, ns_to * sizeof(iFMod[0]));
+   }
    if (s_chan->bRVBActive && do_rvb)
     mix_chan_rvb(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume, RVB);
    else
@@ -1013,7 +1028,7 @@ static void do_channel_work(struct work_item *work)
 
    if (s_chan->bNoise)
     do_lsfr_samples(d, work->ctrl, &spu.dwNoiseCount, &spu.dwNoiseVal);
-   else if (s_chan->bFMod == 2
+   else if ((s_chan->bFMod == 2 && s_chan->iLeftVolume == 0 && s_chan->iRightVolume == 0)
          || (s_chan->bFMod == 0 && spu_config.iUseInterpolation == 0))
     do_samples_noint(decode_block_work, work, ch, d, SB, sinc, &spos, &sbpos);
    else if (s_chan->bFMod == 0 && spu_config.iUseInterpolation == 1)
@@ -1033,8 +1048,13 @@ static void do_channel_work(struct work_item *work)
      decode_dirty_ch |= 1 << ch;
     }
 
-   if (s_chan->bFMod == 2)                         // fmod freq channel
-    memcpy(iFMod, &ChanBuf, ns_to * sizeof(iFMod[0]));
+   if (isTitleName(METAL_GEAR_SOLID_DISC_1_JP) || isTitleName(METAL_GEAR_SOLID_DISC_1_US)){
+     detect_pi(ch, ns_to);
+   }
+
+   if (s_chan->bFMod == 2) {                        // fmod freq channel
+    memcpy(iFMod, ChanBuf, ns_to * sizeof(iFMod[0]));
+   }
    if (s_chan->bRVBActive && work->rvb_addr)
     mix_chan_rvb(work->SSumLR, ns_to,
       work->ch[ch].vol_l, work->ch[ch].vol_r, RVB);
@@ -1193,6 +1213,7 @@ static void do_samples_finish(int *SSumLR, int ns_to,
    {
     memset(spu.pS, 0, ns_to * 2 * sizeof(spu.pS[0]));
     spu.pS += ns_to * 2;
+    memset(SSumLR, 0, ns_to * 2 * sizeof(SSumLR[0]));
    }
   else
   for (ns = 0; ns < ns_to * 2; )
@@ -1342,6 +1363,13 @@ static void RemoveStreams(void)
  spu.XAStart = NULL;
  free(spu.CDDAStart);                                  // free CDDA buffer
  spu.CDDAStart = NULL;
+}
+
+// SPU Reset stream buffer
+int SPUResetStream(void) {
+ RemoveStreams();
+ SetupStreams();
+ return 0;
 }
 
 #if defined(C64X_DSP)
@@ -1634,6 +1662,123 @@ void spu_get_debug_info(int *chans_out, int *run_chans, int *fmod_chans_out, int
  *run_chans = ~spu.dwChannelOn & ~spu.dwChannelDead & irq_chans;
  *fmod_chans_out = fmod_chans;
  *noise_chans_out = noise_chans;
+}
+
+int pi_first[]={
+0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
+0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000000, 0x00000223, 0x00001093,
+0x00001f21, 0x00002c93, 0x0000391f, 0x00004593, 0x00005140, 0x00005b8c, 0x00006497, 0x00006ca4};
+
+void detect_pi(int ch, int ns_to){
+
+  int result = 0;
+  int pi_size = (sizeof(pi_first)/sizeof(int));
+  int i=0,start_index=0,end_index=0,remain=0;
+  static int judge_nextdata[24]={0};
+  static int judge_nextdata_index[24]={0};
+
+  if(!judge_nextdata[ch]){
+    if(pi_size <= ns_to){
+      start_index = 0;
+      end_index = pi_size;
+    }
+    else{
+      start_index = 0;
+      end_index = ns_to;
+      remain=1;
+    }
+  }
+  else{
+    if((pi_size - judge_nextdata_index[ch]) <= ns_to){
+      start_index = judge_nextdata_index[ch];
+      end_index = pi_size - judge_nextdata_index[ch];
+    }
+    else{
+      start_index = judge_nextdata_index[ch];
+      end_index = ns_to;
+      remain=1;
+    }
+  }
+
+  for(i=0; i<end_index; i++){
+    if( ChanBuf[i] != pi_first[start_index + i]){
+      break;
+    }
+  }
+
+  if((i == end_index) && (remain ==1)){
+    judge_nextdata[ch] = 1;
+    judge_nextdata_index[ch] = start_index + i;
+  }
+  else if(i == end_index){
+    result = 1;
+  }
+  else{
+    judge_nextdata[ch] = 0;
+    judge_nextdata_index[ch] = 0;
+  }
+
+  if (result == 1) {
+    set_bo_trg(1, ch);
+    memset(judge_nextdata,0,sizeof(judge_nextdata));
+    memset(judge_nextdata_index,0,sizeof(judge_nextdata_index));
+  }
+  else {
+    set_bo_trg(0, ch);
+  }
+}
+
+void CALLBACK SPUfadein(void)
+{
+ int end = spu_config.iVolume;
+ float t, v;
+
+ spu_config.iVolume = 0;
+ usleep(300000);
+
+ if (spu_config.iVolume != 0) end = spu_config.iVolume;
+
+ for (t = -2; t <= 2; t += 0.125) {
+  v = (tanh(t) + 1) * (end / 2.0);
+  spu_config.iVolume = (int)v;
+  usleep(62500);
+  if (spu_config.iVolume != (int)v) end = spu_config.iVolume;
+ }
+
+ spu_config.iVolume = end;
+
+ return;
+}
+
+void CALLBACK SPUenableRvbConfig(int val)
+{
+ if (isTitleName(ARC_THE_LAD_JP)) {
+  isRvbConfigEnabled = val;
+  if (isRvbConfigEnabled) {
+   spu_config.iUseInterpolation = 3;
+   spu_config.iTempo = 1;
+  } else {
+   spu_config.iUseInterpolation = 1;
+   spu_config.iTempo = 0;
+  }
+ } else if (isTitleName(PARASITE_EVE_DISC_1_JP)) {
+  isRvbConfigEnabled = val;
+ }
+
+ return;
+}
+
+int SPUisRvbConfigEnabled(void)
+{
+ int val = 0;
+
+ if (isTitleName(ARC_THE_LAD_JP)) {
+  val = isRvbConfigEnabled;
+ } else if (isTitleName(PARASITE_EVE_DISC_1_JP)) {
+  val = isRvbConfigEnabled;
+ }
+
+ return val;
 }
 
 // vim:shiftwidth=1:expandtab

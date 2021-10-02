@@ -111,6 +111,9 @@ typedef struct {
 } cdrStruct;
 
 extern cdrStruct cdr;
+extern int is_disc_change;
+extern int is_nop_count;
+extern int nop_cnt;
 
 void cdrReset();
 void cdrAttenuate(s16 *buf, int samples, int stereo);

@@ -60,6 +60,8 @@ extern  bool blend;
 typedef struct {
 	u32 Version;
 	u32 GPU_gp1;
+	u32 EventStatus;
+	u32 EventCnt;
 	u32 Control[256];
 	unsigned char FrameBuffer[1024*512*2];
 } GPUFreeze_t;

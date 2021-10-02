@@ -22,6 +22,7 @@
 #include "externals.h"
 #include "registers.h"
 #include "spu.h"
+#include "spu_config.h"
 
 ////////////////////////////////////////////////////////////////////////
 // freeze structs
@@ -113,7 +114,10 @@ typedef struct
  uint32_t ulFreezeSize;
  unsigned char cSPUPort[0x200];
  unsigned char cSPURam[0x80000];
- xa_decode_t   xaS;     
+ xa_decode_t   xaS;
+ unsigned char *SPUInfo;
+ int volume;
+ int reverb;
 } SPUFreeze_t;
 
 typedef struct
@@ -228,21 +232,26 @@ long CALLBACK SPUfreeze(uint32_t ulFreezeMode, SPUFreeze_t * pF,
  uint32_t cycles)
 {
  int i;SPUOSSFreeze_t * pFO;
-
- if(!pF) return 0;                                     // first check
-
+ size_t size;
+ 
  do_samples(cycles, 1);
 
  if(ulFreezeMode)                                      // info or save?
   {//--------------------------------------------------//
-   if(ulFreezeMode==1)                                 
-    memset(pF,0,sizeof(SPUFreeze_t)+sizeof(SPUOSSFreeze_t));
-
-   strcpy(pF->szSPUName,"PBOSS");
-   pF->ulFreezeVersion=5;
-   pF->ulFreezeSize=sizeof(SPUFreeze_t)+sizeof(SPUOSSFreeze_t);
-
-   if(ulFreezeMode==2) return 1;                       // info mode? ok, bye
+   size = sizeof(SPUFreeze_t)+sizeof(SPUOSSFreeze_t);
+   if(ulFreezeMode==1) {
+     if(pF) {
+       memset(pF,0,size);
+     }
+   }
+   if(pF) {
+     strcpy(pF->szSPUName,"PBOSS");
+     pF->ulFreezeVersion=5;
+     pF->ulFreezeSize=size;
+   }
+   
+   if(ulFreezeMode==2) return (long)size;              // info mode? ok, bye
+   if(!pF) return 0;                                   // first check
                                                        // save mode:
    memcpy(pF->cSPURam,spu.spuMem,0x80000);             // copy common infos
    memcpy(pF->cSPUPort,spu.regArea,0x200);
@@ -271,12 +280,17 @@ long CALLBACK SPUfreeze(uint32_t ulFreezeMode, SPUFreeze_t * pF,
       pFO->s_chan[i].iLoop=spu.s_chan[i].pLoop-spu.spuMemC;
     }
 
+   pF->volume = spu_config.iVolume;
+   pF->reverb = SPUisRvbConfigEnabled();
+
    return 1;
    //--------------------------------------------------//
   }
                                                        
  if(ulFreezeMode!=0) return 0;                         // bad mode? bye
+ if(!pF) return 0;                                     // first check
 
+ SPUResetStream();					// reset SPU stream buffer
  memcpy(spu.spuMem,pF->cSPURam,0x80000);               // get ram
  memcpy(spu.regArea,pF->cSPUPort,0x200);
  spu.bMemDirty = 1;
@@ -310,6 +324,9 @@ long CALLBACK SPUfreeze(uint32_t ulFreezeMode, SPUFreeze_t * pF,
 
  if (spu.spuCtrl & CTRL_IRQ)
   schedule_next_irq();
+
+ spu_config.iVolume = pF->volume;
+ SPUenableRvbConfig(pF->reverb);
 
  return 1;
 }

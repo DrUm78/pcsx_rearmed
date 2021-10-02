@@ -22,6 +22,7 @@
 #include "externals.h"
 #include "registers.h"
 #include "spu_config.h"
+#include "../../libpcsxcore/title.h"
 
 static void SoundOn(int start,int end,unsigned short val);
 static void SoundOff(int start,int end,unsigned short val);
@@ -31,6 +32,7 @@ static void SetVolumeL(unsigned char ch,short vol);
 static void SetVolumeR(unsigned char ch,short vol);
 static void SetPitch(int ch,unsigned short val);
 static void ReverbOn(int start,int end,unsigned short val);
+static int  SetDisableVolumeChange(short vol);
 
 ////////////////////////////////////////////////////////////////////////
 // WRITE REGISTERS: called by main emu
@@ -50,6 +52,10 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
  int rofs = (r - 0xc00) >> 1;
  int changed = spu.regArea[rofs] != val;
  spu.regArea[rofs] = val;
+
+ static int isAlreadyRunBiosLogo = 0;
+ static int spuOn2OffCnt = 0;
+ unsigned short former_spuCtrl;
 
  if (!changed && (ignore_dupe[rofs >> 5] & (1 << (rofs & 0x1f))))
   return;
@@ -102,7 +108,14 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
        spu.s_chan[ch].ADSRX.SustainIncrease= (lval&0x4000)?0:1;
        spu.s_chan[ch].ADSRX.SustainRate = (lval>>6) & 0x007f;
        spu.s_chan[ch].ADSRX.ReleaseModeExp = (lval&0x0020)?1:0;
-       spu.s_chan[ch].ADSRX.ReleaseRate = lval & 0x001f;
+       if (isTitleName(PARASITE_EVE_DISC_1_JP) ||
+               isTitleName(PARASITE_EVE_DISC_1_US) ||
+               isTitleName(PARASITE_EVE_DISC_2_JP) ||
+               isTitleName(PARASITE_EVE_DISC_2_US)) {
+           spu.s_chan[ch].ADSRX.ReleaseRate = ((lval & 0x001f)*9)/10;
+       } else {
+           spu.s_chan[ch].ADSRX.ReleaseRate = lval & 0x001f;
+       }
        //----------------------------------------------//
       }
      break;
@@ -137,6 +150,19 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
         if (val & CTRL_IRQ)
          schedule_next_irq();
       }
+
+      if (isAlreadyRunBiosLogo == 0) {
+	former_spuCtrl = spu.spuCtrl;
+
+	if ((!(val & 0x8000)) && (former_spuCtrl & 0x8000)) {
+	  // waiting until sound data has been played.
+	  while (SOUND_isPlaying()) {};
+	  
+	  if (++spuOn2OffCnt > 2) {
+	    isAlreadyRunBiosLogo = 1;
+	  }
+	}
+      }
       spu.spuCtrl=val;
       break;
     //-------------------------------------------------//
@@ -168,15 +194,74 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
     case H_ExtRight:
      //auxprintf("ER %d\n",val);
       break;
+*/
     //-------------------------------------------------//
     case H_SPUmvolL:
-     //auxprintf("ML %d\n",val);
+      if (isTitleName(ARMORED_CORE_JP)) {
+      	double percent = (double)val / ARMORED_CORE_JP_MAX_VOLUME;
+      	spu_config.iVolume = 768 * percent;
+      } else if (isTitleName(CRASH_BANDICOOT_2_EU) ||
+      	isTitleName(CRASH_BANDICOOT_2_JP) ||
+      	isTitleName(CRASH_BANDICOOT_2_US) ||
+      	isTitleName(JUMPING_FLASH_EU) ||
+      	isTitleName(JUMPING_FLASH_JP) ||
+      	isTitleName(JUMPING_FLASH_US) ||
+      	isTitleName(METAL_GEAR_SOLID_DISC_1_EU) ||
+      	isTitleName(METAL_GEAR_SOLID_DISC_2_EU) ||
+      	isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+      	isTitleName(METAL_GEAR_SOLID_DISC_2_JP) ||
+      	isTitleName(METAL_GEAR_SOLID_DISC_1_US) ||
+      	isTitleName(METAL_GEAR_SOLID_DISC_2_US) ||
+      	isTitleName(SILENT_HILL_EU) ||
+      	isTitleName(SILENT_HILL_JP) ||
+      	isTitleName(SILENT_HILL_US)) {
+      	if (val != 0) {
+      		spu.dwChannelOn = 0xffffff;
+      		spu_config.iVolume = 768;
+      	} else {
+      		spu.dwChannelOn = 0;
+      		spu_config.iVolume = 0;
+      	}
+      } else if (isTitleName(TOM_CLANCYS_RAINBOW_SIX_EU)) {
+      	double percent = (double)val / TOM_CLANCYS_RAINBOW_SIX_EU_MAX_VOLUME;
+      	spu_config.iVolume = 768 * percent;
+      }
       break;
     //-------------------------------------------------//
     case H_SPUmvolR:
-     //auxprintf("MR %d\n",val);
+      if (isTitleName(ARMORED_CORE_JP)) {
+      	double percent = (double)val / ARMORED_CORE_JP_MAX_VOLUME;
+      	spu_config.iVolume = 768 * percent;
+      } else if (isTitleName(CRASH_BANDICOOT_2_EU) ||
+        isTitleName(CRASH_BANDICOOT_2_JP) ||
+        isTitleName(CRASH_BANDICOOT_2_US) ||
+        isTitleName(JUMPING_FLASH_EU) ||
+        isTitleName(JUMPING_FLASH_JP) ||
+        isTitleName(JUMPING_FLASH_US) ||
+        isTitleName(METAL_GEAR_SOLID_DISC_1_EU) ||
+        isTitleName(METAL_GEAR_SOLID_DISC_2_EU) ||
+        isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+        isTitleName(METAL_GEAR_SOLID_DISC_2_JP) ||
+        isTitleName(METAL_GEAR_SOLID_DISC_1_US) ||
+        isTitleName(METAL_GEAR_SOLID_DISC_2_US) ||
+        isTitleName(SILENT_HILL_EU) ||
+        isTitleName(SILENT_HILL_JP) ||
+        isTitleName(SILENT_HILL_US)) {
+      	if (val != 0) {
+      		spu.dwChannelOn = 0xffffff;
+      		spu_config.iVolume = 768;
+      	} else {
+      		spu.dwChannelOn = 0;
+      		spu_config.iVolume = 0;
+      	}
+      } else if (isTitleName(TOM_CLANCYS_RAINBOW_SIX_EU)) {
+      	double percent = (double)val / TOM_CLANCYS_RAINBOW_SIX_EU_MAX_VOLUME;
+      	spu_config.iVolume = 768 * percent;
+      }
       break;
     //-------------------------------------------------//
+
+/*
     case H_SPUMute1:
      //auxprintf("M0 %04x\n",val);
       break;
@@ -203,10 +288,34 @@ void CALLBACK SPUwriteRegister(unsigned long reg, unsigned short val,
       break;
     //-------------------------------------------------//
     case H_CDLeft:
+      if (isTitleName(TOSHINDEN_EU) ||
+        isTitleName(TOSHINDEN_JP) ||
+        isTitleName(TOSHINDEN_US)) {
+        unsigned short max = isTitleName(TOSHINDEN_JP) ?
+          TOSHINDEN_JP_DEFAULT_VOLUME : TOSHINDEN_DEFAULT_VOLUME;
+        if (val == max) {
+          break;
+        }
+      }
+
+	if (isTitleName(GRADIUS_GAIDEN_JP)) {
+		if (State_CdlPause == 1) {
+			xaSave_iLeftVolume = val & 0x7fff;
+			break;
+		}
+	}
+
       spu.iLeftXAVol=val  & 0x7fff;
       if(spu.cddavCallback) spu.cddavCallback(0,val);
       break;
     case H_CDRight:
+	if (isTitleName(GRADIUS_GAIDEN_JP)) {
+		if (State_CdlPause == 1) {
+			xaSave_iRightVolume = val & 0x7fff;
+			break;
+		}
+	}
+
       spu.iRightXAVol=val & 0x7fff;
       if(spu.cddavCallback) spu.cddavCallback(1,val);
       break;
@@ -428,6 +537,12 @@ static void NoiseOn(int start,int end,unsigned short val)
 
 static void SetVolumeL(unsigned char ch,short vol)     // LEFT VOLUME
 {
+ if (isTitleName(PARASITE_EVE_DISC_1_JP) && ch <= 1) {
+ 	if (SetDisableVolumeChange(vol)) {
+		return;
+	}
+ }
+
  if(vol&0x8000)                                        // sweep?
   {
    short sInc=1;                                       // -> sweep up?
@@ -454,6 +569,12 @@ static void SetVolumeL(unsigned char ch,short vol)     // LEFT VOLUME
 
 static void SetVolumeR(unsigned char ch,short vol)     // RIGHT VOLUME
 {
+ if (isTitleName(PARASITE_EVE_DISC_1_JP) && ch <= 1) {
+ 	if (SetDisableVolumeChange(vol)) {
+		return;
+	}
+ }
+
  if(vol&0x8000)                                        // comments... see above :)
   {
    short sInc=1;
@@ -503,4 +624,22 @@ static void ReverbOn(int start,int end,unsigned short val)
   {
    spu.s_chan[ch].bReverb=val&1;                       // -> reverb on/off
   }
+}
+
+static int SetDisableVolumeChange(short vol) {
+	static int DisableVolumeChange = 0;
+	int disableVolume, enableVolume;
+
+	if (isTitleName(PARASITE_EVE_DISC_1_JP)) {
+		disableVolume = PARASITE_EVE_JP_DISABLE_VOLUME;
+		enableVolume = PARASITE_EVE_JP_ENABLE_VOLUME;
+	}
+
+	if (vol == disableVolume) {
+		DisableVolumeChange = 1;
+	} else if (enableVolume <= vol) {
+		DisableVolumeChange = 0;
+	}
+
+	return DisableVolumeChange;
 }

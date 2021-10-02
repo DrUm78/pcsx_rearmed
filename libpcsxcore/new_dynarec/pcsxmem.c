@@ -11,6 +11,7 @@
 #include "../mdec.h"
 #include "../gpu.h"
 #include "../psxmem_map.h"
+#include "../title.h"
 #include "emu_if.h"
 #include "pcsxmem.h"
 
@@ -209,6 +210,20 @@ make_dma_func(6)
 
 static void io_spu_write16(u32 value)
 {
+	if (isTitleName(DESTRUCTION_DERBY_EU) ||
+		isTitleName(DESTRUCTION_DERBY_US)) {
+		int r = address & 0xfff;
+		if ((r == 0xdb0 || r == 0xdb2) &&
+			(value == 0x0b18 || value == 0x0988 || value == 0x8009)) {
+			value = 0;
+		}
+	}
+
+	if ((isTitleName(IQ_INTELLIGENT_QUBE_JP) && value == IQ_JP_MAX_VOLUME) ||
+			(isTitleName(IQ_INTELLIGENT_QUBE_US) && value == IQ_US_MAX_VOLUME)) {
+		return;
+	}
+
 	// meh
 	SPU_writeRegister(address, value, psxRegs.cycle);
 }
@@ -394,6 +409,9 @@ void new_dyna_pcsx_mem_init(void)
 	map_item(&mem_iortab[IOMEM16(0x1048)], sioReadMode16, 1);
 	map_item(&mem_iortab[IOMEM16(0x104a)], sioReadCtrl16, 1);
 	map_item(&mem_iortab[IOMEM16(0x104e)], sioReadBaud16, 1);
+	if(isTitleName(ARMORED_CORE_JP) || isTitleName(ARMORED_CORE_MASTER_OF_ARENA)) {
+		map_item(&mem_iortab[IOMEM16(0x1054)], sio1ReadCtrl16, 1);
+	}
 	map_item(&mem_iortab[IOMEM16(0x1100)], io_rcnt_read_count0, 1);
 	map_item(&mem_iortab[IOMEM16(0x1104)], io_rcnt_read_mode0, 1);
 	map_item(&mem_iortab[IOMEM16(0x1108)], io_rcnt_read_target0, 1);

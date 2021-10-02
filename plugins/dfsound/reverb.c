@@ -71,6 +71,7 @@ static void MixREVERB(int *SSumLR, int *RVB, int ns_to, int curr_addr)
  int IIR_COEF = rvb->IIR_COEF;
  int space = 0x40000 - rvb->StartAddr;
  int l, r, ns;
+ int shift;
 
  for (ns = 0; ns < ns_to * 2; )
   {
@@ -104,14 +105,20 @@ static void MixREVERB(int *SSumLR, int *RVB, int ns_to, int curr_addr)
 
    preload(RVB + ns + 64*2/4 - 4);
 
+   if (SPUisRvbConfigEnabled()) {
+    shift = 16;
+   } else {
+    shift = 15;
+   }
+
    ACC0 = (g_buffer(ACC_SRC_A0) * rvb->ACC_COEF_A +
            g_buffer(ACC_SRC_B0) * rvb->ACC_COEF_B +
            g_buffer(ACC_SRC_C0) * rvb->ACC_COEF_C +
-           g_buffer(ACC_SRC_D0) * rvb->ACC_COEF_D) >> 15;
+           g_buffer(ACC_SRC_D0) * rvb->ACC_COEF_D) >> shift;
    ACC1 = (g_buffer(ACC_SRC_A1) * rvb->ACC_COEF_A +
            g_buffer(ACC_SRC_B1) * rvb->ACC_COEF_B +
            g_buffer(ACC_SRC_C1) * rvb->ACC_COEF_C +
-           g_buffer(ACC_SRC_D1) * rvb->ACC_COEF_D) >> 15;
+           g_buffer(ACC_SRC_D1) * rvb->ACC_COEF_D) >> shift;
 
    FB_A0 = g_buffer(FB_SRC_A0);
    FB_A1 = g_buffer(FB_SRC_A1);

@@ -31,10 +31,47 @@
 #define CHEATS_DIR "/.pcsx/cheats/"
 #define PATCHES_DIR "/.pcsx/patches/"
 #define BIOS_DIR "/bios/"
+#define SCSHOT_DIR "/.pcsx/screenshots/"
+#define LANG_IMG_DIR "/usr/sony/share/data/images/BMP_TXT_SST/"
+#define DISK_IMG_DIR "/usr/sony/share/data/images/Disk/"
 
 extern char cfgfile_basename[MAXPATHLEN];
 
+#define POWER_DIR "/data/power/"
+#define POWER_OFF_FILE "prepare_suspend"
+
+#define CPU_TEMP_FILE "/dev/shm/power/cpu_temp"
+#define CPU_TEMP_LIMIT_FILE "/dev/shm/power/temp_limit"
+#define CPU_TEMP_LIMIT_STRING "CPU_AUTO_START_TEMP"
+#define DEFAULT_TEMP_LIMIT 80000
+
+#define DISPLAY_MODE_MIN 0
+#define DISPLAY_MODE_MAX 1
+#define DISPLAY_MODE_DEFAULT 1
+#define LANGUAGE_MIN 1
+#define LANGUAGE_MAX 13
+#define LANGUAGE_DEFAULT 13
+#define REGION_MIN 1
+#define REGION_MAX 4
+#define REGION_DEFAULT 3
+#define ENTER_DEFAULT 0
+extern int display_mode;
+extern int language;
+extern int region;
+
+extern char changedisc_message[128];
+extern char solodisc_message[128];
+extern char nottime_message[128];
+extern char ok_image[128];
+
 extern int state_slot;
+
+extern int from_escape;
+extern int power_off_flg;
+extern int is_high_temperature;
+extern unsigned int memcardFlag;
+extern unsigned int memcardFlagOld;
+extern int memcardResetFlag;
 
 /* emu_core_preinit - must be the very first call
  * emu_core_init - to be called after platform-specific setup */
@@ -52,6 +89,9 @@ int emu_save_state(int slot);
 int emu_load_state(int slot);
 
 void set_cd_image(const char *fname);
+
+int create_power_off_thread(void);
+void power_off(void);
 
 extern unsigned long gpuDisp;
 extern int ready_to_go, g_emu_want_quit, g_emu_resetting;
@@ -79,6 +119,10 @@ enum sched_action {
 	SACTION_GUN_A,
 	SACTION_GUN_B,
 	SACTION_GUN_TRIGGER2,
+	SACTION_RESET_EVENT,	// action when reset button pushed
+	SACTION_POWER_OFF,      // action when power button pushed
+	SACTION_CD_CHANGE,
+	SACTION_SYNC_STATE,
 };
 
 #define SACTION_GUN_MASK (0x0f << SACTION_GUN_TRIGGER)

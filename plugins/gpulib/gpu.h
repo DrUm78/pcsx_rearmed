@@ -16,10 +16,16 @@ extern "C" {
 
 #define CMD_BUFFER_LEN          1024
 
+#define GPU_PATCH_SCREEN_ADJUST    (0x00000001)
+#define GPU_PATCH_IS_FF7           (0x00000002)
+#define GPU_PATCH_IS_MR_DRILLER    (0x00000004)
+#define GPU_PATCH_IS_MR_DRILLER_JP (0x00000010)
+
 struct psx_gpu {
   uint32_t cmd_buffer[CMD_BUFFER_LEN];
   uint32_t regs[16];
   uint16_t *vram;
+  uint16_t *vram2;
   union {
     uint32_t reg;
     struct {
@@ -54,6 +60,9 @@ struct psx_gpu {
     int x, y, w, h;
     int x1, x2;
     int y1, y2;
+    int w_regs, h_regs, w_cmd, h_cmd;
+    int region_change;
+    int pck_rate;
   } screen;
   struct {
     int x, y, w, h;
@@ -68,6 +77,11 @@ struct psx_gpu {
     uint32_t blanked:1;
     uint32_t enhancement_enable:1;
     uint32_t enhancement_active:1;
+    uint32_t skip_frame:1;
+    uint32_t dma_chain:1;
+    uint32_t pmt_show:1;
+    uint32_t last_pmt_show:1;
+    uint32_t bo:1;
     uint32_t *frame_count;
     uint32_t *hcnt; /* hsync count */
     struct {
@@ -77,6 +91,10 @@ struct psx_gpu {
       uint32_t hcnt;
     } last_list;
     uint32_t last_vram_read_frame;
+    int bo_cnt;
+    int *bo_trigger;
+    int bo_processing;
+    int bo_2nd;
   } state;
   struct {
     int32_t set:3; /* -1 auto, 0 off, 1-3 fixed */
@@ -135,6 +153,7 @@ long GPUopen(void **dpy);
 long GPUclose(void);
 void GPUvBlank(int is_vblank, int lcf);
 void GPUrearmedCallbacks(const struct rearmed_cbs *cbs_);
+void GPUsetPatchFlag(int flag, int set);
 
 #ifdef __cplusplus
 }

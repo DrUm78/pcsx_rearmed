@@ -23,6 +23,7 @@
 
 #include "psxdma.h"
 #include "gpu.h"
+#include "title.h"
 
 // Dma0/1 in Mdec.c
 // Dma3   in CdRom.c
@@ -196,7 +197,13 @@ void psxDma2(u32 madr, u32 bcr, u32 chcr) { // GPU
 			// Final Fantasy 4 = internal vram time (todo)
 			// Rebel Assault 2 = parse linked list in pieces (todo)
 			// Vampire Hunter D = allow edits to linked list (todo)
-			GPUDMA_INT(size);
+			u32 offset = 0;
+			if (isTitleName(TOSHINDEN_JP)) {
+				if (!(HW_GPU_STATUS & PSXGPU_ILACE_BITS)) {
+					offset = 240000;
+				}
+			}
+			GPUDMA_INT(size + offset);
 			return;
 
 #ifdef PSXDMA_LOG
@@ -249,7 +256,21 @@ void psxDma6(u32 madr, u32 bcr, u32 chcr) {
 		//GPUOTCDMA_INT(size);
 		// halted
 		psxRegs.cycle += words;
-		GPUOTCDMA_INT(16);
+
+		u32 offset = 0;
+		if (isTitleName(TOSHINDEN_EU) ||
+			isTitleName(TOSHINDEN_JP) ||
+			isTitleName(TOSHINDEN_US)) {
+			if (!(HW_GPU_STATUS & PSXGPU_ILACE_BITS)) {
+				offset = 340000;
+			}
+		}
+		else if (isTitleName(KAGERO_JP)) {
+			if (!(HW_GPU_STATUS & PSXGPU_ILACE_BITS)) {
+				offset = 180000;
+			}
+		}
+		GPUOTCDMA_INT(16 + offset);
 		return;
 	}
 #ifdef PSXDMA_LOG

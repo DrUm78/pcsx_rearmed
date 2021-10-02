@@ -25,11 +25,32 @@
 short			*pSndBuffer = NULL;
 int				iBufSize = 0;
 volatile int	iReadPos = 0, iWritePos = 0;
+volatile int	g_isAudioPlaying = 0;
+
+#define DURATION_TIME_FOR_BG_SOUND 500
+
+int SOUND_isPlaying(void) {
+	return g_isAudioPlaying;
+}
 
 static void SOUND_FillAudio(void *unused, Uint8 *stream, int len) {
 	short *p = (short *)stream;
+	static int fromPlayToStopCnt = 0;
+	int waitSoundQueEmpty;
 
 	len /= sizeof(short);
+
+	if ((iReadPos == iWritePos) && (g_isAudioPlaying == 1)) {
+
+		waitSoundQueEmpty = (int)((double)(DURATION_TIME_FOR_BG_SOUND) / ((len / 2) / 44.1)) + 1;
+		if (++fromPlayToStopCnt > waitSoundQueEmpty) {
+			g_isAudioPlaying = 0;
+		}
+
+	} else if ((iReadPos != iWritePos) && (g_isAudioPlaying == 0)) {
+		g_isAudioPlaying = 1;
+		fromPlayToStopCnt = 0;
+	}
 
 	while (iReadPos != iWritePos && len > 0) {
 		*p++ = pSndBuffer[iReadPos++];

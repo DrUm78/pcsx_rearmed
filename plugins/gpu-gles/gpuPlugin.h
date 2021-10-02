@@ -58,6 +58,8 @@ extern "C" {
 typedef struct {
 	unsigned int ulFreezeVersion;
 	unsigned int ulStatus;
+	unsigned int ulEventStatus;
+	unsigned int ulEventCnt;
 	unsigned int ulControl[256];
 	unsigned char psxVRam[1024*1024*2];
 } GPUFreeze_t;

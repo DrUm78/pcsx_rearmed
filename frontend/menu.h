@@ -5,12 +5,15 @@ void menu_finish(void);
 
 void menu_notify_mode_change(int w, int h, int bpp);
 
+void swap_cd(void);
+
 enum g_opts_opts {
 	OPT_SHOWFPS = 1 << 0,
 	OPT_SHOWCPU = 1 << 1,
 	OPT_NO_FRAMELIM = 1 << 2,
 	OPT_SHOWSPU = 1 << 3,
 	OPT_TSGUN_NOTRIGGER = 1 << 4,
+	OPT_AUTOSAVE = 1 << 5,
 };
 
 enum g_scaler_opts {
@@ -35,3 +38,5 @@ extern int soft_filter;
 
 extern int g_menuscreen_w;
 extern int g_menuscreen_h;
+extern int region;
+extern int open_invalid_time;

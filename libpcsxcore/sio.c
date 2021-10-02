@@ -23,6 +23,8 @@
 
 #include "sio.h"
 #include <sys/stat.h>
+#include "../frontend/libpicofe/input.h"
+#include <unistd.h>
 
 // Status Flags
 #define TX_RDY		0x0001
@@ -66,6 +68,7 @@ static unsigned int padst;
 
 char Mcd1Data[MCD_SIZE], Mcd2Data[MCD_SIZE];
 char McdDisable[2];
+unsigned int memcardFlag = 0;
 
 #define SIO_INT(eCycle) { \
 	if (!Config.Sio) { \
@@ -203,6 +206,7 @@ void sioWrite8(unsigned char value) {
 					break;
 			}
 			mcdst = 5;
+			memcardFlag=1;
 			return;
 		case 5:
 			parp++;
@@ -228,7 +232,13 @@ void sioWrite8(unsigned char value) {
 			if (!Config.UseNet) {
 				switch (CtrlReg & 0x2002) {
 					case 0x0002: buf[0] = PAD1_startPoll(1); break;
-					case 0x2002: buf[0] = PAD2_startPoll(2); break;
+					case 0x2002:
+						if(p2_connected) {
+							 buf[0] = PAD2_startPoll(2);
+						} else {
+							goto no_device;
+						}
+						break;
 				}
 			} else {
 				if ((CtrlReg & 0x2002) == 0x0002) {
@@ -371,6 +381,10 @@ unsigned short sioReadBaud16() {
 	return BaudReg;
 }
 
+unsigned short sio1ReadCtrl16() {
+	return 0x80;
+}
+
 void netError() {
 	ClosePlugins();
 	SysMessage(_("Connection closed!\n"));
@@ -476,6 +490,8 @@ void SaveMcd(char *mcd, char *data, uint32_t adr, int size) {
 			fseek(f, adr, SEEK_SET);
 
 		fwrite(data + adr, 1, size, f);
+		int fd = fileno(f);
+		fsync(fd);
 		fclose(f);
 		return;
 	}
@@ -645,6 +661,7 @@ void CreateMcd(char *mcd) {
 	while ((s--) >= 0)
 		fputc(0, f);
 
+	fsync(fileno(f));
 	fclose(f);
 }
 
@@ -657,6 +674,7 @@ void ConvertMcd(char *mcd, char *data) {
 		f = fopen(mcd, "wb");
 		if (f != NULL) {
 			fwrite(data - 3904, 1, MCD_SIZE + 3904, f);
+			fsync(fileno(f));
 			fclose(f);
 		}
 		f = fopen(mcd, "r+");
@@ -686,11 +704,13 @@ void ConvertMcd(char *mcd, char *data) {
 		fputc(0, f); s--;
 		fputc(0xff, f);
 		while (s-- > (MCD_SIZE+1)) fputc(0, f);
+		fsync(fileno(f));
 		fclose(f);
 	} else if(strstr(mcd, ".mem") || strstr(mcd,".vgs")) {
 		f = fopen(mcd, "wb");
 		if (f != NULL) {
 			fwrite(data-64, 1, MCD_SIZE+64, f);
+			fsync(fileno(f));
 			fclose(f);
 		}
 		f = fopen(mcd, "r+");
@@ -708,11 +728,13 @@ void ConvertMcd(char *mcd, char *data) {
 		fputc(0, f); s--;
 		fputc(2, f);
 		while (s-- > (MCD_SIZE+1)) fputc(0, f);
+		fsync(fileno(f));
 		fclose(f);
 	} else {
 		f = fopen(mcd, "wb");
 		if (f != NULL) {
 			fwrite(data, 1, MCD_SIZE, f);
+			fsync(fileno(f));
 			fclose(f);
 		}
 	}
@@ -813,18 +835,73 @@ void GetMcdBlockInfo(int mcd, int block, McdBlock *Info) {
 }
 
 int sioFreeze(void *f, int Mode) {
-	gzfreeze(buf, sizeof(buf));
-	gzfreeze(&StatReg, sizeof(StatReg));
-	gzfreeze(&ModeReg, sizeof(ModeReg));
-	gzfreeze(&CtrlReg, sizeof(CtrlReg));
-	gzfreeze(&BaudReg, sizeof(BaudReg));
-	gzfreeze(&bufcount, sizeof(bufcount));
-	gzfreeze(&parp, sizeof(parp));
-	gzfreeze(&mcdst, sizeof(mcdst));
-	gzfreeze(&rdwr, sizeof(rdwr));
-	gzfreeze(&adrH, sizeof(adrH));
-	gzfreeze(&adrL, sizeof(adrL));
-	gzfreeze(&padst, sizeof(padst));
+	if(Mode == 2) {
+		int iRetSize = sizeof(buf) \
+		  + sizeof(StatReg)	   \
+		  + sizeof(ModeReg)	   \
+		  + sizeof(CtrlReg)	   \
+		  + sizeof(BaudReg)	   \
+		  + sizeof(bufcount)	   \
+		  + sizeof(parp)	   \
+		  + sizeof(mcdst)	   \
+		  + sizeof(rdwr)	   \
+		  + sizeof(adrH)	   \
+		  + sizeof(adrL)	   \
+		  + sizeof(padst);
 
-	return 0;
+		if(f) {
+			memcpy(f,buf, sizeof(buf));
+			f = (void *)((char *)f + sizeof(buf));
+
+			memcpy(f, &StatReg, sizeof(StatReg));
+			f = (void *)((char *)f + sizeof(StatReg));
+
+			memcpy(f, &ModeReg, sizeof(ModeReg));
+			f = (void *)((char *)f + sizeof(ModeReg));
+
+			memcpy(f, &CtrlReg, sizeof(CtrlReg));
+			f = (void *)((char *)f + sizeof(CtrlReg));
+
+			memcpy(f, &BaudReg, sizeof(BaudReg));
+			f = (void *)((char *)f + sizeof(BaudReg));
+
+			memcpy(f, &bufcount, sizeof(bufcount));
+			f = (void *)((char *)f + sizeof(bufcount));
+
+			memcpy(f, &parp, sizeof(parp));
+			f = (void *)((char *)f + sizeof(parp));
+
+			memcpy(f, &mcdst, sizeof(mcdst));
+			f = (void *)((char *)f + sizeof(mcdst));
+
+			memcpy(f, &rdwr, sizeof(rdwr));
+			f = (void *)((char *)f + sizeof(rdwr));
+
+			memcpy(f, &adrH, sizeof(adrH));
+			f = (void *)((char *)f + sizeof(adrH));
+
+			memcpy(f, &adrL, sizeof(adrL));
+			f = (void *)((char *)f + sizeof(adrL));
+
+			memcpy(f, &padst, sizeof(padst));
+			f = (void *)((char *)f + sizeof(padst));
+		}
+		return iRetSize;
+		
+	} else {
+		gzfreeze(buf, sizeof(buf));
+		gzfreeze(&StatReg, sizeof(StatReg));
+		gzfreeze(&ModeReg, sizeof(ModeReg));
+		gzfreeze(&CtrlReg, sizeof(CtrlReg));
+		gzfreeze(&BaudReg, sizeof(BaudReg));
+		gzfreeze(&bufcount, sizeof(bufcount));
+		gzfreeze(&parp, sizeof(parp));
+		gzfreeze(&mcdst, sizeof(mcdst));
+		gzfreeze(&rdwr, sizeof(rdwr));
+		gzfreeze(&adrH, sizeof(adrH));
+		gzfreeze(&adrL, sizeof(adrL));
+		gzfreeze(&padst, sizeof(padst));
+		
+		return 0;
+	}
 }

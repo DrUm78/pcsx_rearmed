@@ -32,7 +32,9 @@
 #include "psemu_plugin_defs.h"
 #include "../libpcsxcore/new_dynarec/new_dynarec.h"
 #include "../libpcsxcore/psxmem_map.h"
+#include "../libpcsxcore/misc.h"
 #include "../plugins/dfinput/externals.h"
+#include "../libpcsxcore/title.h"
 
 #define HUD_HEIGHT 10
 
@@ -58,6 +60,57 @@ void (*pl_plat_blit)(int doffs, const void *src, int w, int h,
 		     int sstride, int bgr24);
 void (*pl_plat_hud_print)(int x, int y, const char *str, int bpp);
 
+static int s_bgr24_old = 0;
+static unsigned char s_scrennshotBuf[1024 *512 * 2];
+
+void set_scenes(int scenes) {
+	pl_rearmed_cbs.gpu_peops.scenes = scenes;
+}
+
+#define FRAME_INTERVAL_ADJUSTED 18821
+void change_frame_Motionjpeg(int onoff){
+
+	if(onoff){
+		frame_interval = 16667;
+		frame_interval1024 = 17066667;
+        }
+        else{
+		frame_interval = FRAME_INTERVAL_ADJUSTED;
+		frame_interval1024 = FRAME_INTERVAL_ADJUSTED*1024;
+	}
+}
+
+#define DO_CANCEL 0x80000000
+void set_bo_trg(int onoff, int ch){
+
+	static int trg_off_cnt = 0;
+	int region = 0;
+	int threshold = 0;
+
+	if ((isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+		isTitleName(METAL_GEAR_SOLID_DISC_1_US))) {
+		if (isTitleName(METAL_GEAR_SOLID_DISC_1_JP)) {
+			region = 1;
+			threshold = 300*24;
+		}
+		if (isTitleName(METAL_GEAR_SOLID_DISC_1_US)) {
+			region = 2;
+			threshold = 300*24;
+		}
+
+		if (onoff) {
+			pl_rearmed_cbs.gpu_unai.lineskip = region;
+			trg_off_cnt = 0;
+		}
+		else {
+			if ( trg_off_cnt > threshold) {
+				pl_rearmed_cbs.gpu_unai.lineskip = onoff;
+				trg_off_cnt = 0;
+			}
+			trg_off_cnt++;
+		}
+	}
+}
 
 static __attribute__((noinline)) int get_cpu_ticks(void)
 {
@@ -352,9 +405,22 @@ static void pl_vout_flip(const void *vram, int stride, int bgr24, int w, int h)
 	if (bgr24)
 	{
 		if (pl_rearmed_cbs.only_16bpp) {
+			bgr24 = 0;
 			for (; h1-- > 0; dest += dstride * 2, src += stride)
 			{
-				bgr888_to_rgb565(dest, src, w * 3);
+				if (h - h1 == 1 && isTitleName(IQ_INTELLIGENT_QUBE_JP)) {
+					unsigned char blank_src[1024 * 3];
+					memset(blank_src, 0x0, sizeof(blank_src));
+					bgr888_to_rgb565(dest, blank_src, w * 3);
+				} else if (h - h1 < 16 &&
+						(isTitleName(SUPER_PUZZLE_FIGHTER_2_TURBO_US) ||
+						isTitleName(SUPER_PUZZLE_FIGHTER_2_X_JP))) {
+					unsigned char blank_src[1024 * 3];
+					memset(blank_src, 0x0, sizeof(blank_src));
+					bgr888_to_rgb565(dest, blank_src, w * 3);
+				} else {
+					bgr888_to_rgb565(dest, src, w * 3);
+				}
 			}
 		}
 		else {
@@ -363,7 +429,19 @@ static void pl_vout_flip(const void *vram, int stride, int bgr24, int w, int h)
 
 			for (; h1-- > 0; dest += dstride * 3, src += stride)
 			{
-				bgr888_to_rgb888(dest, src, w * 3);
+				if (h - h1 == 1 && isTitleName(IQ_INTELLIGENT_QUBE_JP)) {
+					unsigned char blank_src[1024 * 3];
+					memset(blank_src, 0x0, sizeof(blank_src));
+					memcpy(dest, blank_src, w * 3);
+				} else if (h - h1 < 16 &&
+						(isTitleName(SUPER_PUZZLE_FIGHTER_2_TURBO_US) ||
+						isTitleName(SUPER_PUZZLE_FIGHTER_2_X_JP))) {
+					unsigned char blank_src[1024 * 3];
+					memset(blank_src, 0x0, sizeof(blank_src));
+					memcpy(dest, blank_src, w * 3);
+				} else {
+					memcpy( dest, src, w * 3 );
+				}
 			}
 		}
 	}
@@ -398,23 +476,91 @@ static void pl_vout_flip(const void *vram, int stride, int bgr24, int w, int h)
 	{
 		for (; h1-- > 0; dest += dstride * 2, src += stride)
 		{
-			bgr555_to_rgb565(dest, src, w * 2);
+			if (h - h1 == 1 && isTitleName(IQ_INTELLIGENT_QUBE_JP)) {
+				unsigned char blank_src[1024 * 3];
+				memset(blank_src, 0x0, sizeof(blank_src));
+				bgr555_to_rgb565(dest, blank_src, w * 2);
+			} else if (h - h1 < 16 &&
+					(isTitleName(SUPER_PUZZLE_FIGHTER_2_TURBO_US) ||
+					isTitleName(SUPER_PUZZLE_FIGHTER_2_X_JP))) {
+				unsigned char blank_src[1024 * 3];
+				memset(blank_src, 0x0, sizeof(blank_src));
+				bgr555_to_rgb565(dest, blank_src, w * 2);
+			} else {
+				if(isTitleName(ARC_THE_LAD_JP) ||
+				isTitleName(ARC_THE_LAD_2_JP) ||
+				isTitleName(SAGAFRONTIER_JP) ||
+				isTitleName(COOL_BOARDERS_2_EU)) {
+					bgr555_to_rgb565_without_neon(dest, src, w * 2);
+				} else {
+					bgr555_to_rgb565(dest, src, w * 2);
+				}
+			}
 		}
 	}
 
+	// bottom blank
+	int blank_pixel = 2;
+	if (isTitleName(MR_DRILLER_EU) ||
+            isTitleName(MR_DRILLER_JP) ||
+            isTitleName(MR_DRILLER_US)) {
+		blank_pixel = 6;
+	}
+	paint_black(dest, dstride * blank_pixel * pl_vout_bpp / 8);
+	dest += dstride * blank_pixel * pl_vout_bpp / 8;
+
+	// PLF-363 Blink RYU silhouette
+	if (isTitleName(GRAN_TURISMO_EU) ||
+            isTitleName(GRAN_TURISMO_JP) ||
+            isTitleName(GRAN_TURISMO_US) ||
+            isTitleName(STREET_FIGHTER_ALPHA_3_US)) {
+                //static unsigned short former_rgb565[2][w * h];
+	        static unsigned short former_rgb565[2][640 * 512]; // show frontend/plat_sdl.c:224
+		static int voutCnt = 0;
+		unsigned short *us_pl_vout_buf = (unsigned short *)pl_vout_buf;
+		unsigned short *pformer_rgb565;
+		
+		pformer_rgb565 = &former_rgb565[voutCnt][0];
+		memcpy(pformer_rgb565, pl_vout_buf, sizeof(former_rgb565) / 2);
+		
+		voutCnt ^= 0x01;
+		pformer_rgb565 = &former_rgb565[voutCnt][0];
+		
+		for(int i = 0; i < (sizeof(former_rgb565) / 2) / sizeof(unsigned short) ; i ++) {
+		        unsigned short us0 = \
+			  (*(us_pl_vout_buf + i) >> 1) & 0x7bef; // mask rgb msb (0x7bef = 0111 1011 1110 1111)
+			unsigned short us1 = \
+			  (*(pformer_rgb565 + i) >> 1) & 0x7bef; // mask rgb msb (         --R- -===G===- -B--)
+
+			*(us_pl_vout_buf + i) = us0 + us1;
+		}
+	}
 out_hud:
 	print_hud(w * pl_vout_scale_w, h * pl_vout_scale_h, 0);
 
 out:
 	pcnt_end(PCNT_BLIT);
 
+	if( dest != NULL ){
+		s_bgr24_old = bgr24;
+	}
+
 	// let's flip now
-	pl_vout_buf = plat_gvideo_flip();
+	pl_vout_buf = plat_gvideo_flip( s_bgr24_old );
 	if (pl_vout_buf != NULL)
 		pl_vout_buf = (char *)pl_vout_buf
 			+ pl_vout_yoffset * pl_vout_w * pl_vout_bpp / 8;
 
 	pl_rearmed_cbs.flip_cnt++;
+}
+
+void paint_black(void *dst_, int bytes) {
+	unsigned short *dst = dst_;
+	int x;
+
+	for (x = 0; x < bytes / 2; x++) {
+		dst[x] = 0;
+	}
 }
 
 static int pl_vout_open(void)
@@ -454,7 +600,14 @@ void *pl_prepare_screenshot(int *w, int *h, int *bpp)
 	*h = pl_vout_h;
 	*bpp = pl_vout_bpp;
 
-	return pl_vout_buf;
+	if( s_bgr24_old ){
+		*bpp = 16;
+		bgr888_to_rgb565(s_scrennshotBuf, pl_vout_buf, pl_vout_w * pl_vout_h * 3 );
+		return s_scrennshotBuf;
+	}else{
+		return pl_vout_buf;
+	}
+
 }
 
 /* display/redering mode switcher */
@@ -591,6 +744,8 @@ static void update_analogs(void)
 	//printf("%4d %4d %4d %4d\n", in_a1[0], in_a1[1], in_a2[0], in_a2[1]);
 }
 
+#define ONE_CONTROLLER 0
+#define TWO_CONTROLLER 16
 static void update_input(void)
 {
 	int actions[IN_BINDTYPE_COUNT] = { 0, };
@@ -610,8 +765,30 @@ static void update_input(void)
 		emu_act = which;
 	}
 	emu_set_action(emu_act);
+	// auto save state
+	if (time_to_sync_state && emu_act != SACTION_CD_CHANGE) {
+		emu_set_action(SACTION_SYNC_STATE);
+	}
+        // auto_power_off
+        if (power_off_flg) {
+                emu_set_action(SACTION_POWER_OFF);
+        }
+	// error : cpu temperature is too high
+	if (is_high_temperature) {
+		save_error(ERROR_CPUOVERHEAT, "CPU temperature is too high.");
+		emu_set_action(SACTION_RESET_EVENT);
+	}
 
 	in_keystate = actions[IN_BINDTYPE_PLAYER12];
+
+	if (isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+		isTitleName(METAL_GEAR_SOLID_DISC_1_US)) {
+			if (pl_rearmed_cbs.gpu_unai.lineskip &&
+				((in_keystate & (1 << DKEY_START + ONE_CONTROLLER)) ||
+				(in_keystate & (1 << DKEY_START + TWO_CONTROLLER)))) {
+					pl_rearmed_cbs.gpu_unai.lineskip |= DO_CANCEL;
+			}
+	}
 }
 #else /* MAEMO */
 extern void update_input(void);
@@ -732,8 +909,22 @@ void pl_timing_prepare(int is_pal_)
 	pl_rearmed_cbs.cpu_usage = 0;
 
 	is_pal = is_pal_;
-	frame_interval = is_pal ? 20000 : 16667;
-	frame_interval1024 = is_pal ? 20000*1024 : 17066667;
+
+       if(isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+          isTitleName(METAL_GEAR_SOLID_DISC_2_JP) ||
+          isTitleName(METAL_GEAR_SOLID_DISC_1_US) ||
+          isTitleName(METAL_GEAR_SOLID_DISC_2_US)) {
+           frame_interval = is_pal ? 20000 : FRAME_INTERVAL_ADJUSTED;
+           frame_interval1024 = is_pal ? 20000*1024 : FRAME_INTERVAL_ADJUSTED*1024;
+       }
+       else if(isTitleName(SAGAFRONTIER_JP)) {
+           frame_interval = is_pal ? 20000 : 18377;
+           frame_interval1024 = is_pal ? 20000*1024 : 18377*1024;
+       }
+       else {
+           frame_interval = is_pal ? 20000 : 16667;
+           frame_interval1024 = is_pal ? 20000*1024 : 17066667;
+       }
 
 	// used by P.E.Op.S. frameskip code
 	pl_rearmed_cbs.gpu_peops.fFrameRateHz = is_pal ? 50.0f : 59.94f;

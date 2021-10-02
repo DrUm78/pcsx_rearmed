@@ -192,7 +192,8 @@ extern u32 next_interupt;
 
 void new_dyna_before_save(void);
 void new_dyna_after_save(void);
-void new_dyna_freeze(void *f, int mode);
+int new_dyna_freeze(void *f, int mode);
+void new_dyna_freeze_data(unsigned char** buff_out, int* size_out);
 
 #define new_dyna_set_event(e, c) { \
 	s32 c_ = c; \

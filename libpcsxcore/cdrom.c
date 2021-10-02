@@ -25,6 +25,11 @@
 #include "ppf.h"
 #include "psxdma.h"
 #include "arm_features.h"
+#include "title.h"
+#include "misc.h"
+#include "../plugins/dfsound/externals.h"
+#include "../plugins/dfsound/spu_config.h"
+#include "../frontend/plugin_lib.h"
 
 /* logging */
 #if 0
@@ -46,6 +51,11 @@
 
 cdrStruct cdr;
 static unsigned char *pTransfer;
+
+int is_disc_change = 0;
+int is_nop_count = 0;
+int nop_cnt = 0;
+static int scenes=0;
 
 /* CD-ROM magic numbers */
 #define CdlSync        0
@@ -135,7 +145,14 @@ unsigned char Test23[] = { 0x43, 0x58, 0x44, 0x32, 0x39 ,0x34, 0x30, 0x51 };
 // PSXCLK = 1 sec in the ps
 // so (PSXCLK / 75) = cdr read time (linuzappz)
 #define cdReadTime (PSXCLK / 75)
+// video sector head
+#define CD_STR_HEAD (0x80010160)
+#define CD_STR_HEAD_SIZE (0x20)
 
+#define H_CDLeft 0x0db0
+#define SET_VOLUME_L 0x1f801c00
+#define SET_VOLUME_R 0x1f801c12
+#define MAX_VOLUME 0x7fff
 enum drive_state {
 	DRIVESTATE_STANDBY = 0,
 	DRIVESTATE_LID_OPEN,
@@ -151,6 +168,20 @@ enum seeked_state {
 };
 
 static struct CdrStat stat;
+static int isUseBuf = 0;
+static int arc_sec_count = 0;
+static int arc_sec_not_read = 0;
+
+static int RunBiosLogoFarst = 0;
+
+int Loading2Setloc = 0;
+
+int xaSave_iLeftVolume;
+int xaSave_iRightVolume;
+unsigned char State_CdlPause;
+
+#define ARC_BUFF_MAX (10)
+static unsigned char arcSecBuf[ARC_BUFF_MAX][DATA_SIZE];
 
 static unsigned int msf2sec(const u8 *msf) {
 	return ((msf[0] * 60 + msf[1]) * 75) + msf[2];
@@ -224,6 +255,96 @@ static void sec2msf(unsigned int s, u8 *msf) {
 	cdr.ResultP = 0; \
 	cdr.ResultC = size; \
 	cdr.ResultReady = 1; \
+}
+
+extern void change_HSync_Motionjpeg(int onfoff);
+extern void change_frame_Motionjpeg(int onfoff);
+extern void check_Motionjpeg(unsigned char arg1, unsigned char arg2, unsigned char arg3);
+extern void set_scenes(int scenes);
+
+int CheckDiscChange(unsigned short irq)
+{
+	// check exit conditions
+	if ((is_disc_change || is_nop_count) && irq != CdlNop && irq != CdlSetmode && irq != CdlGetTN && irq != CdlSetloc && irq != CdlStop) {
+		is_nop_count = 0;
+		nop_cnt = 0;
+		return 0;
+	}
+
+	// check initiation conditions
+	if (!is_disc_change) {
+		switch (disc_change_type) {
+		case 1:
+			if (irq == CdlStop) {
+				is_nop_count = 0;
+				nop_cnt = 0;
+				return 1;
+			}
+			else if (irq == CdlPause) {
+				is_nop_count = 1;
+			}
+			else if (irq == CdlNop && is_nop_count) {
+				nop_cnt++;
+				if (nop_cnt >= 20) {
+					is_nop_count = 0;
+					nop_cnt = 0;
+					return 1;
+				}
+			}
+			break;
+		case 2:
+			if (irq == CdlStop) {
+				is_nop_count = 0;
+				nop_cnt = 0;
+				return 1;
+			}
+			else if (irq == CdlPause || irq == CdlReadN || irq == CdlReadS) {
+				is_nop_count = 1;
+			}
+			else if (irq == CdlNop && is_nop_count) {
+				nop_cnt++;
+				if (nop_cnt >= 20) {
+					is_nop_count = 0;
+					nop_cnt = 0;
+					return 1;
+				}
+			}
+			break;
+		case 3:
+			if (irq == CdlStop) {
+				is_nop_count = 0;
+				nop_cnt = 0;
+				return 1;
+			}
+			break;
+		case 4:
+			if (irq == CdlStop || irq == CdlPause) {
+				is_nop_count = 0;
+				nop_cnt = 0;
+				return 1;
+			}
+			break;
+		case 5:
+			if (irq == CdlStop || irq == CdlReadN || irq == CdlReadS) {
+				is_nop_count = 0;
+				nop_cnt = 0;
+				return 1;
+			}
+			else if (irq == CdlPause) {
+				is_nop_count = 1;
+			}
+			else if (irq == CdlNop && is_nop_count) {
+				nop_cnt++;
+				if (nop_cnt >= 20) {
+					is_nop_count = 0;
+					nop_cnt = 0;
+					return 1;
+				}
+			}
+		}
+		return 0;
+	}
+	return 1;
 }
 
 static void setIrq(void)
@@ -382,6 +503,19 @@ static void ReadTrack(const u8 *time) {
 
 	CDR_LOG("ReadTrack *** %02x:%02x:%02x\n", tmp[0], tmp[1], tmp[2]);
 
+	if (isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+		isTitleName(METAL_GEAR_SOLID_DISC_1_US) ||
+		isTitleName(METAL_GEAR_SOLID_DISC_2_JP) ||
+		isTitleName(METAL_GEAR_SOLID_DISC_2_US)) {
+		check_Motionjpeg(tmp[0], tmp[1], tmp[2]);
+		check_scenes(tmp[0], tmp[1], tmp[2]);
+	}
+
+	if (isTitleName(WILD_ARMS_US) ||
+		isTitleName(WILD_ARMS_JP)) {
+		check_scenesforSPU(tmp[0], tmp[1], tmp[2]);
+	}
+
 	cdr.RErr = CDR_readTrack(tmp);
 	memcpy(cdr.Prev, tmp, 3);
 
@@ -390,14 +524,16 @@ static void ReadTrack(const u8 *time) {
 
 	subq = (struct SubQ *)CDR_getBufferSub();
 	if (subq != NULL && cdr.CurTrack == 1) {
-		crc = calcCrc((u8 *)subq + 12, 10);
-		if (crc == (((u16)subq->CRC[0] << 8) | subq->CRC[1])) {
+//		crc = calcCrc((u8 *)subq + 12, 10);
+//		if (crc == (((u16)subq->CRC[0] << 8) | subq->CRC[1])) {
+		if (subq->TrackNumber != 0) {
 			cdr.subq.Track = subq->TrackNumber;
 			cdr.subq.Index = subq->IndexNumber;
 			memcpy(cdr.subq.Relative, subq->TrackRelativeAddress, 3);
 			memcpy(cdr.subq.Absolute, subq->AbsoluteAddress, 3);
 		}
 		else {
+			generate_subq(time);
 			CDR_LOG_I("subq bad crc @%02x:%02x:%02x\n",
 				tmp[0], tmp[1], tmp[2]);
 		}
@@ -502,7 +638,14 @@ void cdrPlayInterrupt()
 		cdr.TrackChanged = FALSE;
 	}
 
-	if (!cdr.Play) return;
+	if (!cdr.Play){
+		if (isTitleName(TOSHINDEN_EU) ||
+			isTitleName(TOSHINDEN_JP) ||
+			isTitleName(TOSHINDEN_US)) {
+			SPU_writeRegister(H_CDLeft, 0, psxRegs.cycle);
+		}
+		 return;
+	}
 
 	CDR_LOG( "CDDA - %d:%d:%d\n",
 		cdr.SetSectorPlay[0], cdr.SetSectorPlay[1], cdr.SetSectorPlay[2] );
@@ -815,6 +958,33 @@ void cdrInterrupt() {
 		case CdlSeekL:
 		case CdlSeekP:
 			StopCdda();
+
+			if (isTitleName(WILD_ARMS_US)) {
+				if(cdr.SetSector[0] == 0x20 && cdr.SetSector[1] == 0x1c && cdr.SetSector[2] == 0x3d && scenes) {
+					cdr.Seeked = SEEK_DONE;
+					cdr.Stat = Complete;
+					break;
+				} else if(cdr.SetSector[0] == 0x26 && cdr.SetSector[1] == 0x32 && cdr.SetSector[2] == 0xb && scenes) {
+					if (msf2sec(cdr.SetSector) <= msf2sec(cdr.SetSectorPlay)) {
+						cdr.Seeked = SEEK_DONE;
+						cdr.Stat = Complete;
+						break;
+					}
+				}
+			} else if (isTitleName(WILD_ARMS_JP)) {
+				if(cdr.SetSector[0] == 0x20 && cdr.SetSector[1] == 0x1d && cdr.SetSector[2] == 0x6 && scenes) {
+					cdr.Seeked = SEEK_DONE;
+					cdr.Stat = Complete;
+					break;
+				} else if(cdr.SetSector[0] == 0x26 && cdr.SetSector[1] == 0x32 && cdr.SetSector[2] == 0x1f  && scenes) {
+					if (msf2sec(cdr.SetSector) <= msf2sec(cdr.SetSectorPlay)) {
+						cdr.Seeked = SEEK_DONE;
+						cdr.Stat = Complete;
+						break;
+					}
+				}
+			}
+
 			StopReading();
 			cdr.StatP |= STATUS_SEEK;
 
@@ -877,7 +1047,24 @@ void cdrInterrupt() {
 			}
 			cdr.Result[0] |= (cdr.Result[1] >> 4) & 0x08;
 
-			strncpy((char *)&cdr.Result[4], "PCSX", 4);
+			switch (CdromId[2]) {
+			case 'P':
+			case 'p':
+				strncpy((char *)&cdr.Result[4], "SCEI", 4);
+				break;
+// To compliance the requirement, remove trademark notification
+//			case 'E':
+//			case 'e':
+//				strncpy((char *)&cdr.Result[4], "SCEE", 4);
+//				break;
+//			case 'U':
+//			case 'u':
+//				strncpy((char *)&cdr.Result[4], "SCEA", 4);
+//				break;
+			default:
+				strncpy((char *)&cdr.Result[4], "    ", 4);
+				break;
+			}
 			cdr.Stat = Complete;
 			break;
 
@@ -1024,6 +1211,7 @@ void cdrAttenuate(s16 *buf, int samples, int stereo)
 	int lr = cdr.AttenuatorLeftToRight;
 	int rl = cdr.AttenuatorRightToLeft;
 	int rr = cdr.AttenuatorRightToRight;
+	int shift;
 
 	if (lr == 0 && rl == 0 && 0x78 <= ll && ll <= 0x88 && 0x78 <= rr && rr <= 0x88)
 		return;
@@ -1031,12 +1219,38 @@ void cdrAttenuate(s16 *buf, int samples, int stereo)
 	if (!stereo && ll == 0x40 && lr == 0x40 && rl == 0x40 && rr == 0x40)
 		return;
 
+	if (isTitleName(ARMORED_CORE_JP) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_1_EU) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_1_JP) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_1_US) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_2_EU) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_2_JP) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_2_US) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_3_EU) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_3_JP) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_3_US) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_4_JP) ||
+			isTitleName(G_DARIUS_JP) ||
+			isTitleName(JUMPING_FLASH_EU) ||
+			isTitleName(JUMPING_FLASH_JP) ||
+			isTitleName(JUMPING_FLASH_US) ||
+			isTitleName(PARASITE_EVE_DISC_1_JP) ||
+			isTitleName(PARASITE_EVE_DISC_1_US) ||
+			isTitleName(PARASITE_EVE_DISC_2_JP) ||
+			isTitleName(PARASITE_EVE_DISC_2_US) ||
+			isTitleName(TEKKEN3_EU) ||
+			isTitleName(TEKKEN3_JP)) {
+		shift = 8;
+	} else {
+		shift = 7;
+	}
+
 	if (stereo) {
 		for (i = 0; i < samples; i++) {
 			l = buf[i * 2];
 			r = buf[i * 2 + 1];
-			l = (l * ll + r * rl) >> 7;
-			r = (r * rr + l * lr) >> 7;
+			l = (l * ll + r * rl) >> shift;
+			r = (r * rr + l * lr) >> shift;
 			ssat32_to_16(l);
 			ssat32_to_16(r);
 			buf[i * 2] = l;
@@ -1046,7 +1260,13 @@ void cdrAttenuate(s16 *buf, int samples, int stereo)
 	else {
 		for (i = 0; i < samples; i++) {
 			l = buf[i];
-			l = l * (ll + rl) >> 7;
+/* PLF-409 DEL Start */
+//			l = l * (ll + rl) >> 7;
+/* PLF-409 DEL End */
+            if (isTitleName(MEDIEVIL_EU) ||
+                isTitleName(MEDIEVIL_US)) {
+                l = l * (ll + rl) >> shift;
+            }
 			//r = r * (rr + lr) >> 7;
 			ssat32_to_16(l);
 			//ssat32_to_16(r);
@@ -1074,6 +1294,14 @@ void cdrReadInterrupt() {
 	cdr.Result[0] = cdr.StatP;
 	cdr.Seeked = SEEK_DONE;
 
+	if (isTitleName(DESTRUCTION_DERBY_EU) &&
+			Loading2Setloc &&
+			cdr.SetSectorPlay[0] == 0 &&
+			cdr.SetSectorPlay[1] == 2 &&
+			cdr.SetSectorPlay[2] == 23) {
+		cdr.SetSectorPlay[2] = 22;
+	}
+
 	ReadTrack(cdr.SetSectorPlay);
 
 	buf = CDR_getBuffer();
@@ -1089,9 +1317,48 @@ void cdrReadInterrupt() {
 		return;
 	}
 
+	const char searchLicenseString[] =
+	  "          Licensed  by          Sony Computer Entertainment(Europe)\0\0\0\0";
+	const char changeLicenseString[] =
+	  "          Licensed  by          Sony Computer Entertainment(Eur  ope) \0";
+	
+	int searchLicenseStringLen = sizeof(searchLicenseString) - 1;
+	int cnt = 0;
+	int foundCnt = 0;
+	
+	if ((cdr.SetSectorPlay[0] == 0) &&
+	    (cdr.SetSectorPlay[1] == 2) &&
+	    (cdr.SetSectorPlay[2] == 4) &&
+	    (cdr.SetSectorPlay[3] == 0)) {
+
+		// License string area.
+		while(cnt != DATA_SIZE) {
+			if (*(buf + cnt) == searchLicenseString[foundCnt]) {
+				if(++foundCnt == searchLicenseStringLen) {
+					// found !!
+					memcpy(buf + cnt - searchLicenseStringLen + 1,
+					       changeLicenseString,
+					       searchLicenseStringLen); 
+					break;
+				}
+			} else {
+				foundCnt = 0;
+			}
+			cnt ++;
+		}
+	}
+
 	memcpy(cdr.Transfer, buf, DATA_SIZE);
 	CheckPPFCache(cdr.Transfer, cdr.Prev[0], cdr.Prev[1], cdr.Prev[2]);
 
+	if (isTitleName(PACAPACA_PASSION_JP)) {
+		if (isUseBuf) {
+			if (arc_sec_count >= ARC_BUFF_MAX)
+				arc_sec_count = 0;
+			memcpy(arcSecBuf[arc_sec_count++], buf, DATA_SIZE);
+			CheckPPFCache(arcSecBuf[arc_sec_count-1], cdr.Prev[0], cdr.Prev[1], cdr.Prev[2]);
+		}
+	}
 
 	CDR_LOG("cdrReadInterrupt() Log: cdr.Transfer %x:%x:%x\n", cdr.Transfer[0], cdr.Transfer[1], cdr.Transfer[2]);
 
@@ -1115,6 +1382,12 @@ void cdrReadInterrupt() {
 		}
 	}
 
+	if (isTitleName(PARAPPA_THE_RAPPER_US)
+		&& cdr.SetSectorPlay[0] == 62
+		&& cdr.SetSectorPlay[1] == 53
+		&& cdr.SetSectorPlay[2] == 66) {
+		cdrWrite1(0x08);
+	}
 	cdr.SetSectorPlay[2]++;
 	if (cdr.SetSectorPlay[2] == 75) {
 		cdr.SetSectorPlay[2] = 0;
@@ -1127,7 +1400,31 @@ void cdrReadInterrupt() {
 
 	cdr.Readed = 0;
 
-	CDREAD_INT((cdr.Mode & MODE_SPEED) ? (cdReadTime / 2) : cdReadTime);
+	if (isTitleName(IQ_INTELLIGENT_QUBE_JP) &&
+			cdr.SetSectorPlay[0] == 1 &&
+			cdr.SetSectorPlay[1] == 55 &&
+			(57 <= cdr.SetSectorPlay[2] && cdr.SetSectorPlay[2] <= 74)) {
+		CDREAD_INT(cdReadTime / 2 * 0.5);
+	} else if (isTitleName(IQ_INTELLIGENT_QUBE_US) &&
+			cdr.SetSectorPlay[0] == 1 &&
+			cdr.SetSectorPlay[1] == 20 &&
+			(60 <= cdr.SetSectorPlay[2] && cdr.SetSectorPlay[2] <= 74)) {
+		CDREAD_INT(cdReadTime / 2 * 0.5);
+	} else if (isTitleName(WILD_ARMS_JP) &&
+			cdr.SetSectorPlay[0] == 32 &&
+			cdr.SetSectorPlay[1] == 29 &&
+			(7 <= cdr.SetSectorPlay[2] && cdr.SetSectorPlay[2] <= 50)) {
+		CDREAD_INT(cdReadTime / 2 * 0.9);
+	} else if (isTitleName(WILD_ARMS_US) &&
+			cdr.SetSectorPlay[0] == 32 &&
+			(cdr.SetSectorPlay[1] == 28 &&
+			(61 <= cdr.SetSectorPlay[2] && cdr.SetSectorPlay[2] <= 74)) ||
+			(cdr.SetSectorPlay[1] == 29 &&
+			(0 <= cdr.SetSectorPlay[2] && cdr.SetSectorPlay[2] <= 30))) {
+		CDREAD_INT(cdReadTime / 2 * 0.9);
+	} else {
+		CDREAD_INT((cdr.Mode & MODE_SPEED) ? (cdReadTime / 2) : cdReadTime);
+	}
 
 	/*
 	Croc 2: $40 - only FORM1 (*)
@@ -1225,10 +1522,713 @@ void cdrWrite1(unsigned char rt) {
 	}
 #endif
 
+	is_disc_change = CheckDiscChange(cdr.Cmd);
+
 	cdr.ResultReady = 0;
 	cdr.Ctrl |= 0x80;
+
 	// cdr.Stat = NoIntr; 
-	AddIrqQueue(cdr.Cmd, 0x800);
+	if (isTitleName(ARC_THE_LAD_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x24 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 375);
+			RunBiosLogoFarst = 1;
+		} else if (cdr.Cmd == CdlPause &&
+				cdr.SetSector[0] == 9 &&
+				cdr.SetSector[1] == 41 &&
+				cdr.SetSector[2] == 43) {
+			SPU_enableRvbConfig(1);
+			AddIrqQueue(cdr.Cmd, 0x800);
+		} else if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x38 &&
+				cdr.Param[1] == 0x24 &&
+				cdr.Param[2] == 0x11) {
+			SPU_enableRvbConfig(0);
+			AddIrqQueue(cdr.Cmd, 0x800);
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(ARC_THE_LAD_2_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x26 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 300);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(ARMORED_CORE_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x22 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(COOL_BOARDERS_2_EU)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(CRASH_BANDICOOT_EU)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x24 && 
+				cdr.Param[1] == 0x15 &&
+				cdr.Param[2] == 0x4) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 60);
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(CRASH_BANDICOOT_US)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x24 &&
+				cdr.Param[1] == 0x29 &&
+				cdr.Param[2] == 0x1) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 60);
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(DESTRUCTION_DERBY_EU)) {
+		if( cdr.Cmd == CdlSetloc) {
+			if (cdr.Param[0] == 0x0 &&
+					cdr.Param[1] == 0x2 &&
+					cdr.Param[2] == 0x22) {
+				Loading2Setloc = 1;
+			} else {
+				Loading2Setloc = 0;
+			}
+		}
+
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x22 &&
+				cdr.Param[2] == 0x1 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 300);
+			RunBiosLogoFarst = 1;
+
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(FINAL_FANTANSY_VII_DICS_1_US) ||
+			isTitleName(FINAL_FANTANSY_VII_DICS_1_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(G_DARIUS_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(GRADIUS_GAIDEN_JP)) {
+		if (cdr.Cmd == CdlPause) {
+			State_CdlPause = 1;
+			xaSave_iLeftVolume = 0xFFFF;
+			xaSave_iRightVolume =0xFFFF;
+		} else if (cdr.Cmd == CdlSetloc && State_CdlPause == 1) {
+				if (xaSave_iLeftVolume != 0xFFFF) {
+					spu.iLeftXAVol = xaSave_iLeftVolume;
+					xaSave_iLeftVolume = 0xFFFF;
+				}
+				if (xaSave_iRightVolume != 0xFFFF) {
+					spu.iRightXAVol = xaSave_iRightVolume;
+					xaSave_iRightVolume = 0xFFFF;
+				}
+				State_CdlPause = 0;
+		}
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x22 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 375);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(GRAND_THEFT_AUTO_EU)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x22 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+		if (RunBiosLogoFarst == 1 &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25) {
+			spu.dwNewChannel&=~(1<<4);
+			spu.dwNewChannel&=~(1<<5);
+			spu.s_chan[4].ADSRX.ReleaseRate = 0x5;
+			spu.s_chan[5].ADSRX.ReleaseRate = 0x5;
+			spu.s_chan[4].ADSRX.State = ADSR_RELEASE;
+			spu.s_chan[5].ADSRX.State = ADSR_RELEASE;
+			RunBiosLogoFarst = 0xFF;
+		}
+
+	} else if (isTitleName(G_DARIUS_JP)) {
+		if((cdr.Cmd == CdlSetloc && cdr.Param[0] == 0x00 && cdr.Param[1] == 0x10 && cdr.Param[2] == 0x53) ||
+			(cdr.Cmd == CdlSetloc && cdr.Param[0] == 0x27 && cdr.Param[1] == 0x19 && cdr.Param[2] == 0x64) ||
+			(cdr.Cmd == CdlSetloc && cdr.Param[0] == 0x27 && cdr.Param[1] == 0x19 && cdr.Param[2] == 0x65)) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 60);
+		} else if((cdr.Cmd == CdlSetloc && cdr.Param[0] == 0x00 && cdr.Param[1] == 0x19 && cdr.Param[2] == 0x42) ||
+			(cdr.Cmd == CdlSetloc && cdr.Param[0] == 0x00 && cdr.Param[1] == 0x13 && cdr.Param[2] == 0x37) ||
+			(cdr.Cmd == CdlSetloc && cdr.Param[0] == 0x00 && cdr.Param[1] == 0x14 && cdr.Param[2] == 0x38) ||
+			(cdr.Cmd == CdlSetloc && cdr.Param[0] == 0x01 && cdr.Param[1] == 0x51 && cdr.Param[2] == 0x16)) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 58);
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(IQ_INTELLIGENT_QUBE_JP) ||
+			isTitleName(IQ_INTELLIGENT_QUBE_US)) {
+		if (cdr.Cmd == CdlReadS) {
+			unsigned short volume = isTitleName(IQ_INTELLIGENT_QUBE_JP) ?
+					IQ_JP_MAX_VOLUME : IQ_US_MAX_VOLUME;
+			SPU_writeRegister(H_CDLeft, volume, psxRegs.cycle);
+		}
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x22 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(JUMPING_FLASH_EU) ||
+			isTitleName(JUMPING_FLASH_JP)) {
+		if (isTitleName(JUMPING_FLASH_JP)) {
+			if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x0 &&
+					cdr.Param[1] == 0x2 &&
+					cdr.Param[2] == 0x25 &&
+					RunBiosLogoFarst == 0) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+				RunBiosLogoFarst = 1;
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x50 &&
+					cdr.Param[1] == 0x30 &&
+					cdr.Param[2] == 0x38) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x8 &&
+					cdr.Param[1] == 0x20 &&
+					cdr.Param[2] == 0x13) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x50 &&
+					cdr.Param[1] == 0x44 &&
+					cdr.Param[2] == 0x59) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x15 &&
+					cdr.Param[1] == 0x7 &&
+					cdr.Param[2] == 0x24) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x50 &&
+					cdr.Param[1] == 0x59 &&
+					cdr.Param[2] == 0x13) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x22 &&
+					cdr.Param[1] == 0x17 &&
+					cdr.Param[2] == 0x70) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x51 &&
+					cdr.Param[1] == 0x13 &&
+					cdr.Param[2] == 0x34) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x29 &&
+					cdr.Param[1] == 0x42 &&
+					cdr.Param[2] == 0x71) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x51 &&
+					cdr.Param[1] == 0x27 &&
+					cdr.Param[2] == 0x55) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x36 &&
+					cdr.Param[1] == 0x4 &&
+					cdr.Param[2] == 0x61) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x43 &&
+					cdr.Param[1] == 0x11 &&
+					cdr.Param[2] == 0x68) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 7);
+			} else {
+				AddIrqQueue(cdr.Cmd, 0x800);
+			}
+		} else {
+			if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x0 &&
+					cdr.Param[1] == 0x2 &&
+					cdr.Param[2] == 0x25 &&
+					RunBiosLogoFarst == 0) {
+					AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+					RunBiosLogoFarst = 1;
+			} else {
+				AddIrqQueue(cdr.Cmd, 0x800);
+			}
+		}
+
+	} else if (isTitleName(KAGERO_JP)) {
+		if (cdr.Cmd == CdlSetloc) {
+			if (cdr.Param[0] == 0x24 && cdr.Param[1] == 0x16 && cdr.Param[2] == 0x64) {
+				//movie
+				AddIrqQueue(cdr.Cmd, cdReadTime * 15);
+			} else if (cdr.Param[0] == 0x28 && cdr.Param[1] == 0x31 && cdr.Param[2] == 0x43) {
+				//config
+				AddIrqQueue(cdr.Cmd, cdReadTime * 25);
+			} else if (cdr.Param[0] == 0x30 && cdr.Param[1] == 0x56 && cdr.Param[2] == 0x56) {
+				//trapMake
+				AddIrqQueue(cdr.Cmd, cdReadTime * 30);
+			} else if (cdr.Param[0] == 0x35 && cdr.Param[1] == 0x42 && cdr.Param[2] == 0x73) {
+				//logo
+				AddIrqQueue(cdr.Cmd, cdReadTime);
+			} else {
+				AddIrqQueue(cdr.Cmd, 0x800);
+			}
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(MEDIEVIL_EU)) {
+		if (cdr.Cmd == CdlSetloc) {
+			if ((cdr.Param[0] == 0x43 && cdr.Param[1] == 0x16 && cdr.Param[2] == 0x2) ||
+					(cdr.Param[0] == 0x49 && cdr.Param[1] == 0x12 && cdr.Param[2] == 0x54)) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 5);
+			} else {
+				AddIrqQueue(cdr.Cmd, 0x800);
+			}
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(MEDIEVIL_US)) {
+		if (cdr.Cmd == CdlSetloc) {
+			if ((cdr.Param[0] == 0x38 && cdr.Param[1] == 0x7 && cdr.Param[2] == 0x26) ||
+					(cdr.Param[0] == 0x44 && cdr.Param[1] == 0x4 && cdr.Param[2] == 0x3)) {
+				AddIrqQueue(cdr.Cmd, cdReadTime * 5);
+			} else {
+				AddIrqQueue(cdr.Cmd, 0x800);
+			}
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(METAL_GEAR_SOLID_DISC_1_EU) ||
+			isTitleName(METAL_GEAR_SOLID_DISC_1_JP) ||
+			isTitleName(METAL_GEAR_SOLID_DISC_1_US)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x22 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 400);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(MR_DRILLER_US) ||
+			isTitleName(MR_DRILLER_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 150);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+        } else if (isTitleName(ODDWORLD_ABES_ODDYSEE_EU)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 400);
+			RunBiosLogoFarst = 1;
+		} else if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x09 &&
+				cdr.Param[1] == 0x57 &&
+				cdr.Param[2] == 0x61) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 60);
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+        } else if (isTitleName(ODDWORLD_ABES_ODDYSEE_US)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 400);
+			RunBiosLogoFarst = 1;
+		} else if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x09 &&
+				cdr.Param[1] == 0x58 &&
+				cdr.Param[2] == 0x64) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 60);
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(PARASITE_EVE_DISC_1_US) ||
+			isTitleName(PARASITE_EVE_DISC_1_JP)) {
+		if (isTitleName(PARASITE_EVE_DISC_1_JP)){
+			if (cdr.Cmd == CdlSetloc) {
+				if( (cdr.Param[0] == 0x2 && cdr.Param[1] == 0x11 && cdr.Param[2] == 0x63) ||
+						(cdr.Param[0] == 0x0 && cdr.Param[1] == 0x27 && cdr.Param[2] == 0x64) ) {
+					spu_config.iTempo = 1;
+				} else if( (cdr.Param[0] == 0x0 && cdr.Param[1] == 0x17 && cdr.Param[2] == 0x44) ||
+						(cdr.Param[0] == 0x11 && cdr.Param[1] == 0x9  && cdr.Param[2] == 0x37)) {
+					spu_config.iTempo = 0;
+				} else if (cdr.Param[0] == 0x40 && cdr.Param[1] == 0x38 && cdr.Param[2] == 0x42) {
+					SPU_writeRegister(SET_VOLUME_L, PARASITE_EVE_JP_DISABLE_VOLUME, psxRegs.cycle);
+					SPU_writeRegister(SET_VOLUME_R, PARASITE_EVE_JP_DISABLE_VOLUME, psxRegs.cycle);
+				} else if (cdr.Param[0] == 0x11 && cdr.Param[1] == 0x8 && cdr.Param[2] == 0x6) {
+					SPU_enableRvbConfig(1);
+				} else if (cdr.Param[0] == 0x11 && cdr.Param[1] == 0x11 && cdr.Param[2] == 0x68) {
+					SPU_enableRvbConfig(0);
+				}
+			}
+		}
+
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x15 &&
+				cdr.Param[2] == 0x38) {
+			spu_config.iTempo = 1;
+		}
+
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 150);
+			RunBiosLogoFarst = 1;
+		} else if (isTitleName(PARASITE_EVE_DISC_1_JP) &&
+				cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x2 &&
+				cdr.Param[1] == 0x11 &&
+				cdr.Param[2] == 0x63) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 30);
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(PARASITE_EVE_DISC_2_US) ||
+			isTitleName(PARASITE_EVE_DISC_2_JP)) {
+		if (cdr.Cmd == CdlSetloc) {
+			if( cdr.Param[0] == 0x11 &&
+					cdr.Param[1] == 0x35 &&
+					cdr.Param[2] == 0x10) {
+				spu_config.iTempo = 0;
+			} else if (cdr.Param[0] == 0x11 &&
+					cdr.Param[1] == 0x35 &&
+					cdr.Param[2] == 0x18) {
+				spu_config.iTempo = 0;
+			}
+		}
+		AddIrqQueue(cdr.Cmd, 0x800);
+
+	} else if (isTitleName(PERSONA_JP) ||
+			isTitleName(PERSONA_US)) {
+		if (isTitleName(PERSONA_JP) && cdr.Cmd == CdlSetloc) {
+			if (cdr.Param[0] == 0x0 &&
+					cdr.Param[1] == 0x14 &&
+					cdr.Param[2] == 0x61) {
+				// "Adjust tempo" ON
+				spu_config.iTempo = 1;
+			}
+		} else if (isTitleName(PERSONA_US) && cdr.Cmd == CdlSetloc) {
+			if (cdr.Param[0] == 0x0 &&
+					cdr.Param[1] == 0x17 &&
+					cdr.Param[2] == 0x15) {
+				// "Adjust tempo" ON
+				spu_config.iTempo = 1;
+			}
+		}
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x22 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 400);
+			RunBiosLogoFarst = 1;
+			// "Adjust tempo" OFF
+			spu_config.iTempo = 0;
+		} else if (isTitleName(PERSONA_JP) && cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x18 &&
+				cdr.Param[1] == 0x57 &&
+				cdr.Param[2] == 0x6) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 45);
+		} else if (isTitleName(PERSONA_US) && cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x18 &&
+				cdr.Param[1] == 0x57 &&
+				cdr.Param[2] == 0x33) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 45);
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(RAYMAN_US)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 400);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(RESIDENT_EVIL_EU) ||
+			isTitleName(RESIDENT_EVIL_JP) ||
+			isTitleName(RESIDENT_EVIL_US)) {
+
+		if (isTitleName(RESIDENT_EVIL_JP)) {
+			if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x35 &&
+					cdr.Param[1] == 0x35 &&
+					cdr.Param[2] == 0x42) {
+				// NewGame selected "Adjust tempo" ON
+				spu_config.iTempo = 1;
+			} else if (cdr.Cmd == CdlSetloc &&
+					cdr.Param[0] == 0x35 &&
+					cdr.Param[1] == 0x35 &&
+					cdr.Param[2] == 0x40) {
+				// CharacterSelect selected "Adjust tempo" OFF
+				spu_config.iTempo = 0;
+			}
+		}
+
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x22 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 300);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+		if (RunBiosLogoFarst == 1 &&
+				((cdr.Param[0] == 0x65 && cdr.Param[1] == 0x14 && cdr.Param[2] == 0x4) ||  //US
+				 (cdr.Param[0] == 0x63 && cdr.Param[1] == 0x53 && cdr.Param[2] == 0x47) || //JP
+				 (cdr.Param[0] == 0x63 && cdr.Param[1] == 0x17 && cdr.Param[2] == 0x4))) { //EU
+			spu.dwNewChannel&=~(1<<4);
+			spu.dwNewChannel&=~(1<<5);
+			spu.s_chan[4].ADSRX.State = ADSR_RELEASE;
+			spu.s_chan[5].ADSRX.State = ADSR_RELEASE;
+			RunBiosLogoFarst = 0xFF;
+		}
+
+	} else if (isTitleName(RIDGE_RACER_TYPE_4_EU) ||
+			isTitleName(RIDGE_RACER_TYPE_4_JP) ||
+			isTitleName(RIDGE_RACER_TYPE_4_US)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 400);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(SAGAFRONTIER_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 300);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(SUPER_PUZZLE_FIGHTER_2_TURBO_US)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(SUPER_PUZZLE_FIGHTER_2_X_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 375);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(SYPHON_FILTER_US)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 150);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(TEKKEN3_EU) ||
+			isTitleName(TEKKEN3_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 150);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(TOM_CLANCYS_RAINBOW_SIX_EU)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x22 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(TOSHINDEN_EU) ||
+			isTitleName(TOSHINDEN_JP) ||
+			isTitleName(TOSHINDEN_US)) {
+		if (cdr.Cmd == CdlPlay) {
+			unsigned short volume = isTitleName(TOSHINDEN_JP) ?
+					TOSHINDEN_JP_DEFAULT_VOLUME : TOSHINDEN_DEFAULT_VOLUME;
+			SPU_writeRegister(H_CDLeft, volume | 0x8000, psxRegs.cycle);
+		} else if (cdr.Cmd == CdlPause) {
+			SPU_writeRegister(H_CDLeft, 0x8000, psxRegs.cycle);
+		}
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(TWISTED_METAL_US)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(WILD_ARMS_US) ||
+			isTitleName(WILD_ARMS_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+
+	} else if (isTitleName(XI_EU) ||
+			isTitleName(XI_JP)) {
+		if (cdr.Cmd == CdlSetloc &&
+				cdr.Param[0] == 0x0 &&
+				cdr.Param[1] == 0x2 &&
+				cdr.Param[2] == 0x25 &&
+				RunBiosLogoFarst == 0) {
+			AddIrqQueue(cdr.Cmd, cdReadTime * 450);
+			RunBiosLogoFarst = 1;
+		} else {
+			AddIrqQueue(cdr.Cmd, 0x800);
+		}
+	} else {
+		AddIrqQueue(cdr.Cmd, 0x800);
+	}
+
+	if (RunBiosLogoFarst) pl_rearmed_cbs.gpu_peops.isBiosLogoEnd = 1;
 
 	switch (cdr.Cmd) {
 	case CdlSetloc:
@@ -1243,6 +2243,22 @@ void cdrWrite1(unsigned char rt) {
 		memcpy(cdr.SetSector, set_loc, 3);
 		cdr.SetSector[3] = 0;
 		cdr.SetlocPending = 1;
+		if (isTitleName(PACAPACA_PASSION_JP)) {
+			unsigned char sector_s[4] = {0, 15, 24, 0};
+			unsigned char sector_e[4] = {4, 0,  33, 0};
+			int arc_file_s = msf2sec(sector_s);
+			int arc_file_e = msf2sec(sector_e);
+			int set_sector = msf2sec(cdr.SetSector);
+			if (arc_file_s <= set_sector && set_sector <= arc_file_e) {
+				isUseBuf = 1;
+				arc_sec_count = 0;
+				arc_sec_not_read = 0;
+				memset(arcSecBuf, 0, DATA_SIZE * ARC_BUFF_MAX);
+			}
+			else {
+				isUseBuf = 0;
+			}
+		}
 		break;
 
 	case CdlReadN:
@@ -1334,6 +2350,13 @@ void cdrWrite3(unsigned char rt) {
 	case 3:
 		if (rt & 0x20) {
 			memcpy(&cdr.AttenuatorLeftToLeft, &cdr.AttenuatorLeftToLeftT, 4);
+			if (isTitleName(RESIDENT_EVIL_EU) ||
+					isTitleName(RESIDENT_EVIL_JP) ||
+					isTitleName(RESIDENT_EVIL_US)) {
+				unsigned short volume;
+				volume = fmin((cdr.AttenuatorLeftToLeft + cdr.AttenuatorRightToLeft) << 8, MAX_VOLUME); 
+				SPU_writeRegister(H_CDLeft, volume, psxRegs.cycle);
+			}
 			CDR_LOG_I("CD-XA Volume: %02x %02x | %02x %02x\n",
 				cdr.AttenuatorLeftToLeft, cdr.AttenuatorLeftToRight,
 				cdr.AttenuatorRightToLeft, cdr.AttenuatorRightToRight);
@@ -1408,7 +2431,13 @@ void psxDma3(u32 madr, u32 bcr, u32 chcr) {
 				size = cdsize;
 			if (size > 0)
 			{
-				memcpy(ptr, pTransfer, size);
+				if (isUseBuf && isTitleName(PACAPACA_PASSION_JP)) {
+					if (arc_sec_not_read >= ARC_BUFF_MAX) arc_sec_not_read = 0; // reset ring buffer
+					memcpy(ptr, arcSecBuf[arc_sec_not_read++] + (pTransfer - cdr.Transfer), size);
+				}
+				else {
+					memcpy(ptr, pTransfer, size);
+				}
 			}
 
 			psxCpu->Clear(madr, cdsize / 4);
@@ -1423,6 +2452,16 @@ void psxDma3(u32 madr, u32 bcr, u32 chcr) {
 				// halted
 				psxRegs.cycle += (cdsize/4) * 24/2;
 				CDRDMA_INT(16);
+				int left_cycle = psxRegs.intCycle[PSXINT_CDREAD].sCycle
+								+ psxRegs.intCycle[PSXINT_CDREAD].cycle
+								- psxRegs.cycle;
+				u32 str_headr = *((u32*)ptr);
+				if(left_cycle <= 0x1000
+					&& size == CD_STR_HEAD_SIZE
+					&& ((str_headr&CD_STR_HEAD) == CD_STR_HEAD)) {
+					CDREAD_INT(0x1000);
+					CDR_LOG("psxDma3() Log: CDREAD_INT(0x1000)\n");
+				}
 			}
 			return;
 
@@ -1479,6 +2518,22 @@ int cdrFreeze(void *f, int Mode) {
 	u32 tmp;
 	u8 tmpp[3];
 
+	if(Mode == 2) {
+		int iRetSize = sizeof(cdr) \
+		  + sizeof(tmp);
+
+		if(f) {
+			cdr.freeze_ver = 0x63647202;
+			memcpy(f, &cdr, sizeof(cdr));
+			f = (void *)((char *)f + sizeof(cdr));
+
+			cdr.ParamP = cdr.ParamC;
+			tmp = pTransfer - cdr.Transfer;
+			memcpy(f, &tmp, sizeof(tmp));
+			f = (void *)((char *)f + sizeof(tmp));
+		}
+		return iRetSize;
+	}
 	if (Mode == 0 && !Config.Cdda)
 		CDR_stop();
 	
@@ -1534,3 +2589,164 @@ void LidInterrupt() {
 	StopCdda();
 	cdrLidSeekInterrupt();
 }
+
+int mgs_disk1_jp[][2] = {
+		{0x605657,0x624116},
+		{0x600452,0x605644},
+		{0x624124,0x640462},
+		{0x585550,0x600441}
+};
+int mgs_disk2_jp[][2] = {
+		{0x510434,0x520847},
+		{0x520868,0x543706},
+		{0x550948,0x672735},
+		{0x543723,0x550923}
+};
+int mgs_disk1_us[][2] = {
+		{0x603166,0x621624},
+		{0x593961,0x603152},
+		{0x621632,0x633969},
+		{0x583059,0x593948}
+};
+int mgs_disk2_us[][2] = {
+		{0x504407,0x514820},
+		{0x514840,0x541652},
+		{0x544911,0x670059},
+		{0x541661,0x544862}
+};
+
+void check_Motionjpeg(unsigned char arg1, unsigned char arg2, unsigned char arg3){
+
+	int i,hit=0;
+	int track=arg1<<16|arg2<<8|arg3;
+
+	if (isTitleName(METAL_GEAR_SOLID_DISC_1_JP)){
+		for(i=0; i < sizeof(mgs_disk1_jp)/sizeof(mgs_disk1_jp[0]); i++){
+			if((track >= mgs_disk1_jp[i][0]) && (track <= mgs_disk1_jp[i][1])){
+				hit=1;
+				break;
+			}
+		}
+	}
+	else if (isTitleName(METAL_GEAR_SOLID_DISC_2_JP)){
+		for(i=0; i < sizeof(mgs_disk2_jp)/sizeof(mgs_disk2_jp[0]); i++){
+			if((track >= mgs_disk2_jp[i][0]) && (track <= mgs_disk2_jp[i][1])){
+				hit=1;
+				break;
+			}
+		}
+	}
+	else if (isTitleName(METAL_GEAR_SOLID_DISC_1_US)){
+		for(i=0; i < sizeof(mgs_disk1_us)/sizeof(mgs_disk1_us[0]); i++){
+			if((track >= mgs_disk1_us[i][0]) && (track <= mgs_disk1_us[i][1])){
+				hit=1;
+				break;
+			}
+		}
+	}
+	else if (isTitleName(METAL_GEAR_SOLID_DISC_2_US)){
+		for(i=0; i < sizeof(mgs_disk2_us)/sizeof(mgs_disk2_us[0]); i++){
+			if((track >= mgs_disk2_us[i][0]) && (track <= mgs_disk2_us[i][1])){
+				hit=1;
+				break;
+			}
+		}
+	}
+
+	if(hit){
+		change_HSync_Motionjpeg(1);
+		change_frame_Motionjpeg(1);
+	}
+	else{
+		change_HSync_Motionjpeg(0);
+		change_frame_Motionjpeg(0);
+	}
+}
+
+int mgs_disk1_scenes_jp[][3] = {
+		{0x284037,0x284334,MSG_SCENE1},
+		{0x141408,0x141936,MSG_SCENE2},
+		{0x145317,0x145821,MSG_SCENE3},
+		{0x173745,0x174574,MSG_SCENE4},
+		{0x250774,0x251000,MSG_SCENE5},
+		{0x255266,0x255853,MSG_SCENE6},
+		{0x114172,0x114558,MSG_SCENE7},
+		{0x072815,0x074943,MSG_SCENE8}
+};
+int mgs_disk1_scenes_us[][3] = {
+		{0x284444,0x284770,MSG_SCENE1},
+		{0x141817,0x142357,MSG_SCENE2},
+		{0x145743,0x150240,MSG_SCENE3},
+		{0x174225,0x175022,MSG_SCENE4},
+		{0x251241,0x251435,MSG_SCENE5},
+		{0x255753,0x260318,MSG_SCENE6},
+		{0x114623,0x114969,MSG_SCENE7},
+		{0x073234,0x075411,MSG_SCENE8}
+};
+
+void check_scenes(unsigned char arg1, unsigned char arg2, unsigned char arg3) {
+	int i,hit = 0;
+	int track = arg1 << 16 | arg2 << 8 | arg3;
+
+	if (isTitleName(METAL_GEAR_SOLID_DISC_1_JP)) {
+		for (i = 0; i < sizeof(mgs_disk1_scenes_jp) / sizeof(mgs_disk1_scenes_jp[0]); i++) {
+			if ((track >= mgs_disk1_scenes_jp[i][0]) && (track <= mgs_disk1_scenes_jp[i][1])) {
+				hit = mgs_disk1_scenes_jp[i][2];
+				break;
+			}
+		}
+	}
+	else if (isTitleName(METAL_GEAR_SOLID_DISC_1_US)) {
+		for (i = 0; i < sizeof(mgs_disk1_scenes_us) / sizeof(mgs_disk1_scenes_us[0]); i++) {
+			if ((track >= mgs_disk1_scenes_us[i][0]) && (track <= mgs_disk1_scenes_us[i][1])) {
+				hit = mgs_disk1_scenes_us[i][2];
+				break;
+			}
+		}
+	}
+
+	if (hit) {
+		set_scenes(hit);
+	}
+	else {
+		set_scenes(NO_SCENES);
+	}
+}
+
+int wa_jp[][2] = {
+		{0x385031,0x411234}
+};
+int wa_us[][2] = {
+		{0x385011,0x411741}
+};
+
+void check_scenesforSPU(unsigned char arg1, unsigned char arg2, unsigned char arg3) {
+
+	int i, hit = 0;
+	int track = arg1 << 16 | arg2 << 8 | arg3;
+
+	if (isTitleName(WILD_ARMS_US)) {
+		for (i = 0; i < sizeof(wa_us) / sizeof(wa_us[0]); i++) {
+			if ((track >= wa_us[i][0]) && (track <= wa_us[i][1])) {
+				hit = 1;
+				break;
+			}
+		}
+	}
+	else if (isTitleName(WILD_ARMS_JP)) {
+		for (i = 0; i < sizeof(wa_jp) / sizeof(wa_jp[0]); i++) {
+			if ((track >= wa_jp[i][0]) && (track <= wa_jp[i][1])) {
+				hit = 1;
+				break;
+			}
+		}
+	}
+
+	if (hit) {
+		scenes = 1;
+	}
+	else {
+		scenes = 0;
+	}
+}
+

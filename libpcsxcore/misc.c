@@ -26,10 +26,30 @@
 #include "mdec.h"
 #include "gpu.h"
 #include "ppf.h"
+#include "title.h"
 #include <zlib.h>
+#include "../frontend/menu.h"
+#include "../frontend/main.h"
+#include <dirent.h>
+#include <pthread.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <time.h>
 
 char CdromId[10] = "";
+char CdromId_old[10] = "";
 char CdromLabel[33] = "";
+char CdromLabel_old[33] = "";
+char CdromPath[MAXPATHLEN] = "";
+char CdromPath_old[MAXPATHLEN] = "";
+
+int disc_change_type = 0;
+static pthread_mutex_t statefile_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_t statefile_thread = (pthread_t)0;
+int time_to_sync_state = 0;
+
+#define EXCLUSION_CONTROL
 
 // PSX Executable types
 #define PSX_EXE     1
@@ -38,6 +58,13 @@ char CdromLabel[33] = "";
 #define INVALID_EXE 4
 
 #define ISODCL(from, to) (to - from + 1)
+#define MAX_ERROR_LEN 1024
+#define MAX_STATE_PATH_LEN 64 // sufficient size in the current operation
+
+struct error_info {
+	int id;
+	char message[MAX_ERROR_LEN];
+};
 
 struct iso_directory_record {
 	char length			[ISODCL (1, 1)]; /* 711 */
@@ -52,6 +79,394 @@ struct iso_directory_record {
 	unsigned char name_len		[ISODCL (33, 33)]; /* 711 */
 	char name			[1];
 };
+
+// Save State.
+#define AUTO_SAVE_TO_HEAP_SECOND (2)
+#define AUTO_SAVE_TO_FILE_COUNT	 ((10/AUTO_SAVE_TO_HEAP_SECOND) + 1)
+#define BLOCKING_TIME		 (10)
+
+static struct timespec start_time = {0, 0};
+
+typedef struct {
+	int enable;
+	int counting;
+	int num;
+} disc_change_state;
+
+enum STATUS_RUNING{
+	NOT_BUFF_INITIALIZED = 0,	/* status: not get memory */
+	BUFF_INITIALIZED,			/* status: memory is ready ,only menu setting is ON */
+	CONFIG_SET_OFF				/* status: when menu setting is OFF */
+};
+
+typedef struct {
+	unsigned char*	Buff;
+	int 		Size;
+}data_buff_t;
+
+typedef struct {
+	data_buff_t 	 ScreenPic;
+	data_buff_t 	 BIOS;
+	data_buff_t 	 GPU;
+	data_buff_t 	 SPU;			/* not write to file */
+	data_buff_t 	 SPU1;			/* size is not const */
+	data_buff_t	 SIO;
+	data_buff_t	 CDR;
+	data_buff_t	 PSXHW;
+	data_buff_t	 PSXRCNT;
+	data_buff_t	 MDEC;
+	data_buff_t 	 NewDyna;		/* size is not const */
+	int		 iNewDynaValidDataSize;
+	int				 Num;
+}state_data_t;
+
+static state_data_t g_stateData[AUTO_SAVE_TO_FILE_COUNT];
+static disc_change_state dcstateData[AUTO_SAVE_TO_FILE_COUNT] = {0};
+static int gLastCount = 0;
+static int gFilledNum = 0;
+static int gBuffInitialized = NOT_BUFF_INITIALIZED;
+static int resume_play = 0;
+static int blocking_count = 0;
+int memcardResetFlag = 0;
+unsigned int memcardFlagOld = 0;
+
+static char stateid[AUTO_SAVE_TO_FILE_COUNT][10];
+int isUnknownCdrom = 1;
+int holdResetEvent = 0;
+
+void LogPrint(char* title1, int data){
+        struct timeval myTime;
+        gettimeofday(&myTime, NULL);
+        printf("[%d.%6d] :%s, %d \n", myTime.tv_sec, myTime.tv_usec,title1, data );
+}
+#define xprintf  	//printf
+#define LOG_Print 	//LogPrint
+
+static int lock_statefile_mutex(void)
+{
+#ifdef EXCLUSION_CONTROL
+  int ret;
+
+  ret = pthread_mutex_lock(&statefile_mutex);
+  if (ret != 0) {
+    printf("ERROR: failed to lock the mutex\n");
+    return -1;
+  }
+#endif
+  return 0;
+}
+
+static int unlock_statefile_mutex(void)
+{
+#ifdef EXCLUSION_CONTROL
+  int ret;
+
+  ret = pthread_mutex_unlock(&statefile_mutex);
+  if (ret != 0) {
+    printf("ERROR: failed to unlock the mutex\n");
+    return -1;
+  }
+#endif
+  return 0;
+}
+
+static int write_statefile(struct error_info *err)
+{
+  pid_t pid;
+  int status_num = 1;
+  int fd;
+  struct dirent **entry_list;
+  int entry_num;
+  int i, ret;
+  char file_name[MAX_STATE_PATH_LEN], buff[MAX_ERROR_LEN];
+  char *ext;
+
+  int error_id;
+  char error_msg[MAX_ERROR_LEN];
+
+  error_id = err->id;
+  strcpy(error_msg, err->message);
+  free(err);
+
+  ret = lock_statefile_mutex();
+  if (ret < 0) {
+    return -1;
+  }
+
+  entry_num = scandir(STATUS_DIR, &entry_list, NULL, alphasort);
+  for (i=0; i<entry_num; i++) {
+    ext = strrchr(entry_list[i]->d_name, '.');
+    ret = strcmp(ext, ".sts");
+    if (ret == 0) {
+      status_num++;
+    }
+  }
+  sprintf(buff, "%03d.sts", status_num);
+  sprintf(file_name, "%s%s", STATUS_DIR, buff);
+  fd = open(file_name, O_WRONLY | O_CREAT, 0644);
+  if (fd < 0) {
+    printf("ERROR: failed to open a state file:%s\n", file_name);
+    unlock_statefile_mutex();
+    return -1;
+  }
+
+  sprintf(buff, "%d\n%s", error_id, error_msg);
+  ret = write(fd, buff, strlen(buff));
+  if (fd < 0) {
+    printf("ERROR: failed to write a state file:%s\n", file_name);
+    close(fd);
+    unlock_statefile_mutex();
+    return -1;
+  }
+
+  fsync(fd);
+  close(fd);
+  unlock_statefile_mutex();
+
+  return 0;
+}
+
+int save_error(int error_id, char *error_msg)
+{
+  int ret;
+  struct error_info *err;
+
+  err = malloc(sizeof(struct error_info));
+  bzero(err, sizeof(struct error_info));
+  err->id = error_id;
+  strncpy(err->message, error_msg, MAX_ERROR_LEN-1);
+
+  pthread_attr_t thread_attr;
+  pthread_attr_init(&thread_attr);
+  pthread_attr_setdetachstate(&thread_attr , PTHREAD_CREATE_DETACHED);
+
+  ret = pthread_create(&statefile_thread, &thread_attr, write_statefile, err);
+  pthread_attr_destroy(&thread_attr);
+
+  return ret;
+}
+
+static int setTileScreenAdjust(){
+  int ret = isTitleName(COLIN_MCRAE_RALLY_EU)
+            || isTitleName(CRASH_BANDICOOT_2_EU)
+            || isTitleName(CRASH_BANDICOOT_2_JP)
+            || isTitleName(CRASH_BANDICOOT_2_US)
+            || isTitleName(DESTRUCTION_DERBY_EU)
+            || isTitleName(DESTRUCTION_DERBY_US)
+            || isTitleName(DISNEY_TOY_STORY_2_EU)
+            || isTitleName(DRIVER_EU)
+            || isTitleName(DRIVER_US)
+            || isTitleName(EHRGEIZ_JP)
+            || isTitleName(FIGHTING_FORCE_US)
+            || isTitleName(GRAND_THEFT_AUTO_2_EU)
+            || isTitleName(GRAND_THEFT_AUTO_2_US)
+            || isTitleName(HARRY_POTTER_AND_THE_PHILOSOPHERS_STONE_EU)
+            || isTitleName(KLONOA_DOOR_TO_PHANTAMILE_JP)
+            || isTitleName(KLONOA_DOOR_TO_PHANTAMILE_US)
+            || isTitleName(KULA_WORLD_EU)
+            || isTitleName(MEDIEVIL_EU)
+            || isTitleName(MEDIEVIL_US)
+            || isTitleName(MR_DRILLER_EU)
+            || isTitleName(MR_DRILLER_G_JP)
+            || isTitleName(MR_DRILLER_JP)
+            || isTitleName(MR_DRILLER_US)
+            || isTitleName(PARASITE_EVE_DISC_1_JP)
+            || isTitleName(PARASITE_EVE_DISC_1_US)
+            || isTitleName(PARASITE_EVE_DISC_2_JP)
+            || isTitleName(PARASITE_EVE_DISC_2_US)
+            || isTitleName(RAY_STORM_JP)
+            || isTitleName(RIDGE_RACER_TYPE_4_EU)
+            || isTitleName(RIDGE_RACER_TYPE_4_JP)
+            || isTitleName(RIDGE_RACER_TYPE_4_US)
+            || isTitleName(SILENT_HILL_EU)
+            || isTitleName(SILENT_HILL_JP)
+            || isTitleName(SILENT_HILL_US)
+            || isTitleName(SPEC_OPS_STEALTH_PATROL_US)
+            || isTitleName(STREET_FIGHTER_ALPHA_3_US)
+            || isTitleName(STREET_FIGHTER_EX_PLUS_EU)
+            || isTitleName(STREET_FIGHTER_EX_PLUS_JP)
+            || isTitleName(STREET_FIGHTER_EX_PLUS_US)
+            || isTitleName(TEKKEN3_JP)
+            || isTitleName(TOM_CLANCYS_RAINBOW_SIX_EU)
+            || isTitleName(TOMB_RAIDER_2_EU)
+            || isTitleName(TOMB_RAIDER_2_JP)
+            || isTitleName(TOMB_RAIDER_2_US)
+            || isTitleName(TOMB_RAIDER_EU)
+            || isTitleName(TOMB_RAIDER_JP)
+            || isTitleName(TOMB_RAIDER_US)
+            || isTitleName(TOMBA_JP)
+            || isTitleName(TOMBA_US)
+            || isTitleName(XEVIOUS_3D_G_JP)
+            || isTitleName(XEVIOUS_3D_G_US);
+
+  if(GPU_setPatchFlag)
+	GPU_setPatchFlag(GPU_PATCH_SCREEN_ADJUST, ret);
+
+  return ret;
+}
+
+static int setTitleIsFF7(){
+  int ret = isTitleName(FINAL_FANTANSY_VII_DICS_1_EU)
+            || isTitleName(FINAL_FANTANSY_VII_DICS_1_JP)
+            || isTitleName(FINAL_FANTANSY_VII_DICS_1_US)
+            || isTitleName(FINAL_FANTANSY_VII_DICS_2_EU)
+            || isTitleName(FINAL_FANTANSY_VII_DICS_2_JP)
+            || isTitleName(FINAL_FANTANSY_VII_DICS_2_US)
+            || isTitleName(FINAL_FANTANSY_VII_DICS_3_EU)
+            || isTitleName(FINAL_FANTANSY_VII_DICS_3_JP)
+            || isTitleName(FINAL_FANTANSY_VII_DICS_3_US)
+            || isTitleName(FINAL_FANTANSY_VII_DICS_4_JP);
+
+  if(GPU_setPatchFlag)
+	GPU_setPatchFlag(GPU_PATCH_IS_FF7, ret);
+
+  return ret;
+}
+
+static int setTitleIsMrDriller(){
+  int ret = isTitleName(MR_DRILLER_EU)
+            || isTitleName(MR_DRILLER_G_JP)
+            || isTitleName(MR_DRILLER_JP)
+            || isTitleName(MR_DRILLER_US);
+
+  if(GPU_setPatchFlag)
+	GPU_setPatchFlag(GPU_PATCH_IS_MR_DRILLER, ret);
+
+  return ret;
+}
+
+static int setTitleIsMrDrillerJp(){
+  int ret = isTitleName(MR_DRILLER_JP);
+
+  if(GPU_setPatchFlag)
+    GPU_setPatchFlag(GPU_PATCH_IS_MR_DRILLER_JP, ret);
+
+  return ret;
+}
+
+static int setTitleAddVram2(){
+  int ret = isTitleName(METAL_GEAR_SOLID_DISC_1_EU)
+            || isTitleName(METAL_GEAR_SOLID_DISC_1_JP)
+            || isTitleName(METAL_GEAR_SOLID_DISC_1_US)
+            || isTitleName(METAL_GEAR_SOLID_DISC_2_EU)
+            || isTitleName(METAL_GEAR_SOLID_DISC_2_JP)
+            || isTitleName(METAL_GEAR_SOLID_DISC_2_US);
+
+  if(GPU_setPatchFlag)
+	GPU_setPatchFlag(GPU_PATCH_ADD_VRAM2, ret);
+  return ret;
+}
+
+static int setTitleBO(){
+  int ret = isTitleName(METAL_GEAR_SOLID_DISC_1_JP)
+            || isTitleName(METAL_GEAR_SOLID_DISC_1_US);
+
+  if(GPU_setPatchFlag)
+	GPU_setPatchFlag(GPU_PATCH_ADD_BO, ret);
+  return ret;
+}
+
+static int setTitleIsARCTHELAD(){
+  int ret = isTitleName(ARC_THE_LAD_JP)
+            || isTitleName(ARC_THE_LAD_2_JP);
+
+  if(GPU_setPatchFlag)
+	GPU_setPatchFlag(GPU_PATCH_ARC_THE_LAD, ret);
+
+  return ret;
+}
+
+int isTitleName(enum TITLE_NAME argTitleName)
+{
+  return (g_eTitleName == argTitleName) ? 1 : 0;
+}
+
+void initTitleName(void) {
+  g_eTitleName = TITLE_NAME_NONE;
+}
+
+void setTitleName(void) {
+  int i = 0;
+
+  initTitleName();
+  setCdromId();
+  while(*(stTitleList[i].m_cpCdromId)) {
+    if(strcmp(stTitleList[i].m_cpCdromId , CdromId) == 0) {
+      g_eTitleName = stTitleList[i].m_eTitleName;
+      break;
+    }
+    i++;
+  }
+  setTileScreenAdjust();
+  setTitleIsFF7();
+  setTitleIsMrDriller();
+  setTitleIsMrDrillerJp();
+  setTitleAddVram2();
+  setTitleBO();
+  setTitleIsARCTHELAD();
+}
+
+void setCdromId(void) {
+	char * fileName = strrchr(GetIsoFile(), '/');
+	int c = 0;
+	for (int i = 0; i < strlen(fileName); ++i) {
+		if (fileName[i] == '.' || c >= sizeof(CdromId) - 1) {
+			break;
+		}
+		if (isalnum(fileName[i])) {
+			CdromId[c++] = fileName[i];
+		}
+	}
+}
+
+void setDiscChangeType()
+{
+  int i, n, ret, cd_num;
+  char title_dir_path[128];
+  char *ext, *p;
+  struct dirent **namelist;
+
+  // get title directory path
+  strcpy(title_dir_path, GetIsoFile());
+  p = strrchr(title_dir_path, '/');
+  if (p != NULL) {
+    *p = 0;
+  }
+
+  // count number of .cue file
+  n = scandir(title_dir_path, &namelist, NULL, NULL);
+  cd_num = 0;
+  for (i=0; i<n; i++) {
+    ext = strrchr(namelist[i]->d_name, '.');
+    ret = strcmp(ext, ".cue");
+    if (ret == 0) {
+      cd_num++;
+    }
+  }
+
+  if (cd_num <= 1) {
+    disc_change_type = 0;
+  }
+#if 0
+  else if (isTitleName(DUMMY_TITLE_1)) {
+    disc_change_type = 2;
+  }
+  else if (isTitleName(DUMMY_TITLE_2)) {
+    disc_change_type = 3;
+  }
+  else if (isTitleName(DUMMY_TITLE_3)) {
+    disc_change_type = 4;
+  }
+  else if (isTitleName(DUMMY_TITLE_4)) {
+    disc_change_type = 5;
+  }
+#endif 
+ else {
+    disc_change_type = 1;
+  }
+
+  return;
+}
 
 void mmssdd( char *b, char *p )
 {
@@ -106,6 +521,20 @@ void mmssdd( char *b, char *p )
 	incTime(); \
 	READTRACK(); \
 	memcpy(_dir + 2048, buf + 12, 2048);
+
+void StartCheckOpen(void) {
+	clock_gettime(CLOCK_MONOTONIC, &start_time);
+}
+
+int CheckOpenEnabled(void) {
+	struct timespec current_time;
+
+	clock_gettime(CLOCK_MONOTONIC, &current_time);
+	if (resume_play || current_time.tv_sec - start_time.tv_sec > open_invalid_time) {
+		return 1;
+	}
+	return 0;
+}
 
 int GetCdromFile(u8 *mdir, u8 *time, char *filename) {
 	struct iso_directory_record *dir;
@@ -182,7 +611,7 @@ int LoadCdrom() {
 
 	if (!Config.HLE) {
 		// skip BIOS logos
-		psxRegs.pc = psxRegs.GPR.n.ra;
+		//psxRegs.pc = psxRegs.GPR.n.ra;
 		return 0;
 	}
 
@@ -314,6 +743,8 @@ int CheckCdrom() {
 	char exename[256];
 	int i, len, c;
 
+	initTitleName();
+
 	FreePPFCache();
 
 	time[0] = itob(0);
@@ -363,15 +794,13 @@ int CheckCdrom() {
 	} else
 		return -1;		// SYSTEM.CNF and PSX.EXE not found
 
-	if (CdromId[0] == '\0') {
-		len = strlen(exename);
-		c = 0;
-		for (i = 0; i < len; ++i) {
-			if (exename[i] == ';' || c >= sizeof(CdromId) - 1)
-				break;
-			if (isalnum(exename[i]))
-				CdromId[c++] = exename[i];
-		}
+	char * fileName = strrchr(GetIsoFile(), '/');
+	c = 0;
+	for (i = 0; i < strlen(fileName); ++i) {
+		if (fileName[i] == '.' || c >= sizeof(CdromId) - 1)
+			break;
+		if (isalnum(fileName[i]))
+			CdromId[c++] = fileName[i];
 	}
 
 	if (CdromId[0] == '\0')
@@ -390,8 +819,22 @@ int CheckCdrom() {
 	SysPrintf(_("CD-ROM ID: %.9s\n"), CdromId);
 	SysPrintf(_("CD-ROM EXE Name: %.255s\n"), exename);
 
+	strncpy(CdromPath, GetIsoFile(), sizeof(CdromPath));
+	if (CdromPath_old[0] == '\0' || CdromLabel_old[0] == '\0' || CdromId_old[0] == '\0' || !(g_opts & OPT_AUTOSAVE)) {
+			strncpy(CdromPath_old, CdromPath, sizeof(CdromPath));
+			strncpy(CdromLabel_old, CdromLabel, sizeof(CdromLabel));
+			strncpy(CdromId_old, CdromId, sizeof(CdromId));
+	}
+	if (holdResetEvent) {
+		emu_set_action(SACTION_RESET_EVENT);
+		holdResetEvent = 0;
+	}
+	isUnknownCdrom = 0;
 	BuildPPFCache();
 
+	setTitleName();
+
+	setDiscChangeType();
 	return 0;
 }
 
@@ -526,6 +969,12 @@ int Load(const char *ExePath) {
 	return retval;
 }
 
+static void *fadein(void* param) {
+	SPU_fadein();
+
+	return;
+}
+
 // STATES
 
 static void *zlib_open(const char *name, const char *mode)
@@ -572,7 +1021,7 @@ int SaveState(const char *file) {
 
 	f = SaveFuncs.open(file, "wb");
 	if (f == NULL) return -1;
-
+	xprintf("SaveState  to file [%s] \n", file);
 	new_dyna_before_save();
 
 	SaveFuncs.write(f, (void *)PcsxHeader, 32);
@@ -617,11 +1066,458 @@ int SaveState(const char *file) {
 	mdecFreeze(f, 1);
 	new_dyna_freeze(f, 1);
 
+	// disc change state
+	disc_change_state current_state = {is_disc_change, is_nop_count, nop_cnt};
+	SaveFuncs.write(f, &current_state, sizeof(disc_change_state));
+
+	int fd = fileno(f);
+	fsync(fd);
 	SaveFuncs.close(f);
 
 	new_dyna_after_save();
 
 	return 0;
+}
+
+state_data_t* getSaveStateArray(int count) {
+	if (count < 0 || count >= AUTO_SAVE_TO_FILE_COUNT) return NULL;
+
+	state_data_t* buff = (state_data_t* )&g_stateData[count];
+	return buff;
+}
+
+int SaveStateWork(void * fname) {
+
+	xprintf("SaveStateWork g_opts & OPT_AUTOSAVE  [%d] \n", g_opts & OPT_AUTOSAVE);
+	if ((g_opts & OPT_AUTOSAVE) == 0) {
+		return SaveState(fname);
+	}
+	int old_index;
+
+	if (gFilledNum <= 0) {
+		xprintf("SaveStateWork gFilledNum  [%d] \n", gFilledNum);
+		return -1;
+	}
+	else if (gFilledNum < AUTO_SAVE_TO_FILE_COUNT) {
+		if (resume_play) {
+			return -1;
+		}
+		old_index = 0;
+	}
+	else {
+		if (gLastCount < AUTO_SAVE_TO_FILE_COUNT) {
+			old_index = gLastCount;
+		}
+		else {
+			old_index = 0;
+		}
+	}
+
+	xprintf("SaveStateWork old_index  [%d] , gLastCount [%d], gFilledNum[%d] \n", old_index, gLastCount, gFilledNum);
+
+	void *f = SaveFuncs.open(fname, "wb");
+	if (f == NULL) {
+		printf("SaveStateWork file open failed!! [%s] \n", fname);
+		return -1;
+	}
+
+	state_data_t * pData = getSaveStateArray(old_index);
+	if (pData == NULL) {
+		printf("SaveStateWork  getSaveStateArray  failed!![%d] \n", old_index);
+		return -1;
+	}
+	disc_change_state save_state = dcstateData[old_index];
+
+	if (pData->ScreenPic.Buff) 	SaveFuncs.write(f, (void *)pData->ScreenPic.Buff, pData->ScreenPic.Size);
+	if (pData->BIOS.Buff) 		SaveFuncs.write(f, (void *)pData->BIOS.Buff, pData->BIOS.Size);
+	if (pData->GPU.Buff) 		SaveFuncs.write(f, (void *)pData->GPU.Buff, pData->GPU.Size);
+	if (pData->SPU.Buff) 		SaveFuncs.write(f, (void *)pData->SPU.Buff, pData->SPU.Size);
+	if (pData->SPU1.Buff) 		SaveFuncs.write(f, (void *)pData->SPU1.Buff, pData->SPU1.Size);
+	if (pData->SIO.Buff) 		SaveFuncs.write(f, (void *)pData->SIO.Buff, pData->SIO.Size);
+	if (pData->CDR.Buff) 		SaveFuncs.write(f, (void *)pData->CDR.Buff, pData->CDR.Size);
+	if (pData->PSXHW.Buff) 		SaveFuncs.write(f, (void *)pData->PSXHW.Buff, pData->PSXHW.Size);
+	if (pData->PSXRCNT.Buff) 	SaveFuncs.write(f, (void *)pData->PSXRCNT.Buff, pData->PSXRCNT.Size);
+	if (pData->MDEC.Buff) 		SaveFuncs.write(f, (void *)pData->MDEC.Buff, pData->MDEC.Size);
+	if (pData->NewDyna.Buff) 	SaveFuncs.write(f, (void *)pData->NewDyna.Buff, pData->iNewDynaValidDataSize);
+
+	xprintf("SaveStateWork ScreenPic [%d] \n", pData->ScreenPic.Size);
+	xprintf("SaveStateWork BIOS      [%d] \n", pData->BIOS.Size);
+	xprintf("SaveStateWork GPU       [%d] \n", pData->GPU.Size);
+	xprintf("SaveStateWork SPU       [%d] \n", pData->SPU.Size);
+	xprintf("SaveStateWork SPU1      [%d] \n", pData->SPU1.Size);
+	xprintf("SaveStateWork SIO 	 [%d] \n", pData->SIO.Size);
+	xprintf("SaveStateWork CDR 	 [%d] \n", pData->CDR.Size);
+	xprintf("SaveStateWork PSXHW 	 [%d] \n", pData->PSXHW.Size);
+	xprintf("SaveStateWork PSXRCNT 	 [%d] \n", pData->PSXRCNT.Size);
+	xprintf("SaveStateWork MDEC 	 [%d] \n", pData->MDEC.Size);
+	xprintf("SaveStateWork NewDyna   [%d] \n", pData->NewDyna.Size);
+	xprintf("SaveStateWork Num       [%d] \n", pData->Num);
+
+	SaveFuncs.write(f, (void *)&save_state, sizeof(disc_change_state));
+
+	int fd = fileno(f);
+	fsync(fd);
+	SaveFuncs.close(f);
+
+	return 0;
+}
+
+int freeSaveStateMem(state_data_t * buff) {
+
+	if (buff == NULL) return -1;
+
+	if (buff->ScreenPic.Buff) 	free(buff->ScreenPic.Buff);
+	if (buff->BIOS.Buff) 		free(buff->BIOS.Buff);
+	if (buff->GPU.Buff)		free(buff->GPU.Buff);
+	if (buff->SPU.Buff) 		free(buff->SPU.Buff);
+	if (buff->SPU1.Buff) 		free(buff->SPU1.Buff);
+	if (buff->SIO.Buff) 		free(buff->SIO.Buff);
+	if (buff->CDR.Buff) 		free(buff->CDR.Buff);
+	if (buff->PSXHW.Buff) 		free(buff->PSXHW.Buff);
+	if (buff->PSXRCNT.Buff) 	free(buff->PSXRCNT.Buff);
+	if (buff->MDEC.Buff) 		free(buff->MDEC.Buff);
+	if (buff->NewDyna.Buff) 	free(buff->NewDyna.Buff);
+
+	buff->ScreenPic.Buff = NULL;
+	buff->BIOS.Buff = NULL;
+	buff->GPU.Buff = NULL;
+	buff->SPU.Buff = NULL;
+	buff->SPU1.Buff = NULL;
+	buff->SIO.Buff = NULL;
+	buff->CDR.Buff = NULL;
+	buff->PSXHW.Buff = NULL;
+	buff->PSXRCNT.Buff = NULL;
+	buff->MDEC.Buff = NULL;
+	buff->NewDyna.Buff = NULL;
+
+	return 0;
+}
+
+int SetCdromId(void) {
+	int oldest_index = 0;
+	int ret;
+
+	if (gFilledNum < 0) {
+		return -1;
+	}
+	else if (gFilledNum < AUTO_SAVE_TO_FILE_COUNT - 1) {
+		oldest_index = 0;
+	}
+	else {
+		oldest_index = gLastCount + 1;
+		if (oldest_index >= AUTO_SAVE_TO_FILE_COUNT) {
+			oldest_index = 0;
+		}
+	}
+
+	ret = strncmp(stateid[oldest_index], CdromId, sizeof(CdromId));
+	if (!ret) {
+		ret = strncmp(CdromId_old, CdromId, sizeof(CdromId));
+		if (ret) {
+			strncpy(CdromPath_old, CdromPath, sizeof(CdromPath));
+			strncpy(CdromLabel_old, CdromLabel, sizeof(CdromLabel));
+			strncpy(CdromId_old, CdromId, sizeof(CdromId));
+		}
+	}
+
+	return 0;
+}
+
+int AutoSaveState(int count) {
+	int Size;
+	unsigned char *pMem;
+	if (count >= AUTO_SAVE_TO_FILE_COUNT || count < 0)
+		return -1;
+
+	state_data_t * pStateData = getSaveStateArray(count);
+	if (pStateData == NULL)
+		return -1;
+
+	new_dyna_before_save();
+
+	pMem = pStateData->ScreenPic.Buff;
+	memcpy(pMem, (unsigned char *)PcsxHeader, 32);
+	pMem += 32;
+	memcpy(pMem, (unsigned char *)&SaveVersion, sizeof(u32));
+	pMem += sizeof(u32);
+	memcpy(pMem, (unsigned char *)&Config.HLE, sizeof(boolean));
+	pMem += sizeof(boolean);
+	GPU_getScreenPic(pMem);
+
+
+	if (Config.HLE)
+		psxBiosFreeze(1);
+
+	pMem = pStateData->BIOS.Buff;
+	memcpy(pMem, (unsigned char *)psxM, 0x00200000);
+	pMem += 0x00200000;
+	memcpy(pMem, (unsigned char *)psxR, 0x00080000);
+	pMem += 0x00080000;
+	memcpy(pMem, (unsigned char *)psxH, 0x00010000);
+	pMem += 0x00010000;
+	memcpy(pMem, (unsigned char *)&psxRegs, sizeof(psxRegs));
+
+	// gpu
+	GPUFreeze_t *gpufP = (GPUFreeze_t *)pStateData->GPU.Buff;
+	gpufP->ulFreezeVersion = 1;
+	GPU_freeze(1, gpufP);
+
+	// spu
+	char ca[16];
+	SPUFreeze_t *spufP = (SPUFreeze_t *) ca;
+	SPU_freeze(2, spufP, psxRegs.cycle);
+	Size = spufP->Size;
+	memcpy(pStateData->SPU.Buff, &Size, pStateData->SPU.Size);
+
+	spufP = (SPUFreeze_t *) pStateData->SPU1.Buff;
+	SPU_freeze(1, spufP, psxRegs.cycle);
+	
+	sioFreeze(pStateData->SIO.Buff, 2);
+	cdrFreeze(pStateData->CDR.Buff, 2);
+	psxHwFreeze(pStateData->PSXHW.Buff, 2);
+	psxRcntFreeze(pStateData->PSXRCNT.Buff, 2);
+	mdecFreeze(pStateData->MDEC.Buff, 2);
+	
+        pStateData->iNewDynaValidDataSize = new_dyna_freeze(pStateData->NewDyna.Buff, 2);
+
+	xprintf("AutoSaveState ScreenPic	[%d] \n", pStateData->ScreenPic.Size);
+	xprintf("AutoSaveState BIOS 		[%d] \n", pStateData->BIOS.Size);
+	xprintf("AutoSaveState GPU 		[%d] \n", pStateData->GPU.Size);
+	xprintf("AutoSaveState SPU 		[%d] \n", pStateData->SPU.Size);
+	xprintf("AutoSaveState SPU1 		[%d] \n", pStateData->SPU1.Size);
+	xprintf("AutoSaveState NewDyna 		[%d] \n", pStateData->iNewDynaValidDataSize);
+	xprintf("AutoSaveState Num 		[%d] \n", pStateData->Num);
+
+	disc_change_state current_state = {is_disc_change, is_nop_count, nop_cnt};
+	dcstateData[count] = current_state;
+
+	if (CdromId[0] != '\0') {
+		strncpy(stateid[count], CdromId, sizeof(CdromId));
+	}
+	else {
+		strncpy(stateid[count], CdromId_old, sizeof(CdromId_old));
+	}
+	SetCdromId();
+
+	new_dyna_after_save();
+	return 0;
+}
+
+int InitAutoSave(void) {
+	int ret = 0;
+	gFilledNum = 0;
+	gLastCount = 0;
+	memset((unsigned char *)g_stateData, 0, sizeof(g_stateData));
+
+	state_data_t * pStateData = NULL;
+	for (int i=0;i<AUTO_SAVE_TO_FILE_COUNT;i++) {
+		pStateData = getSaveStateArray(i);
+		if (pStateData == NULL) {
+			ret = -1;
+			break;
+		}
+		freeSaveStateMem(pStateData);
+
+		int size;
+		unsigned char *pMem;
+
+		size = 32 + sizeof(u32) + sizeof(boolean) + 128 * 96 * 3;
+		pMem = (unsigned char *)malloc(size);
+		if (pStateData == NULL) {
+			ret = -1;
+			break;
+		}
+
+		pStateData->ScreenPic.Buff = pMem;
+		pStateData->ScreenPic.Size = size;
+
+		size = 0x00200000 + 0x00080000 + 0x00010000 + sizeof(psxRegs);
+		pMem = (unsigned char *)malloc(size);
+		if (pMem == NULL) {
+			ret = -1;
+			break;
+		}
+
+		pStateData->BIOS.Buff = pMem;
+		pStateData->BIOS.Size = size;
+
+		size = sizeof(GPUFreeze_t);
+		pMem = (unsigned char *)malloc(size);
+		if (pMem == NULL) {
+			ret = -1;
+			break;
+		}
+		pStateData->GPU.Buff = pMem;
+		pStateData->GPU.Size = size;
+
+		size = 4;
+		pMem = (unsigned char *)malloc(size);
+		if (pMem == NULL) {
+			ret = -1;
+			break;
+		}
+
+		pStateData->SPU.Buff = pMem;
+		pStateData->SPU.Size = size;
+
+		pStateData->SPU1.Size = SPU_freeze(2, (void *)0, 0);
+		pStateData->SPU1.Buff = (unsigned char *)malloc(pStateData->SPU1.Size);
+		if (pStateData->SPU1.Buff == NULL) {
+			ret = -1;
+			break;
+		}
+		
+		pStateData->SIO.Size = sioFreeze((void *)0, 2);
+		pStateData->SIO.Buff = (unsigned char *)malloc(pStateData->SIO.Size);
+		if (pStateData->SIO.Buff == NULL) {
+			ret = -1;
+			break;
+		}
+
+		pStateData->CDR.Size = cdrFreeze((void *)0, 2);
+		pStateData->CDR.Buff = (unsigned char *)malloc(pStateData->CDR.Size);
+		if (pStateData->CDR.Buff == NULL) {
+			ret = -1;
+			break;
+		}
+
+		pStateData->PSXHW.Size = psxHwFreeze((void *)0, 2);
+		pStateData->PSXHW.Buff = (unsigned char *)malloc(pStateData->PSXHW.Size);
+		if (pStateData->PSXHW.Buff == NULL) {
+			ret = -1;
+			break;
+		}
+
+		pStateData->PSXRCNT.Size = psxRcntFreeze((void *)0, 2);
+		pStateData->PSXRCNT.Buff = (unsigned char *)malloc(pStateData->PSXRCNT.Size);
+		if (pStateData->PSXRCNT.Buff == NULL) {
+			ret = -1;
+			break;
+		}
+
+		pStateData->MDEC.Size = mdecFreeze((void *)0, 2);
+		pStateData->MDEC.Buff = (unsigned char *)malloc(pStateData->MDEC.Size);
+		if (pStateData->MDEC.Buff == NULL) {
+			ret = -1;
+			break;
+		}
+
+		pStateData->NewDyna.Size = new_dyna_freeze((void *)0, 2);
+		pStateData->NewDyna.Buff = (unsigned char *)malloc(pStateData->NewDyna.Size);
+		if (pStateData->NewDyna.Buff == NULL) {
+			ret = -1;
+			break;
+		}
+		
+		pStateData->Num = i;
+	}
+
+	if (ret == -1) {
+		for (int i=0; i<AUTO_SAVE_TO_FILE_COUNT; i++) {
+ 			pStateData = getSaveStateArray(i);
+			freeSaveStateMem(pStateData);
+		}
+		printf("InitAutoSave malloc failed! \n");
+	}
+	else {
+		gBuffInitialized = BUFF_INITIALIZED;
+		/* wait for 2s when starting */
+		printf("InitAutoSave malloc OK! \n");
+	}
+
+	return ret;
+}
+
+void emu_sync_state(void) {
+	static struct timespec formerTimeSpec = {0, 0};
+	struct timespec currentTimeSpec;
+	struct timespec intervalTimeSpec;
+
+	if ((g_opts & OPT_AUTOSAVE) == 0) {
+		if (BUFF_INITIALIZED == gBuffInitialized) {
+			xprintf("OPT_AUTOSAVE OFF! \n");
+			gLastCount = 0;
+			gFilledNum = 0;
+			gBuffInitialized = CONFIG_SET_OFF;
+		}
+		// check interval time
+		clock_gettime(CLOCK_MONOTONIC, &currentTimeSpec);
+		if((formerTimeSpec.tv_sec == 0) && (formerTimeSpec.tv_nsec == 0)) {
+			memcpy(&formerTimeSpec, &currentTimeSpec, sizeof(struct timespec));
+		}
+
+		intervalTimeSpec.tv_sec = currentTimeSpec.tv_sec - formerTimeSpec.tv_sec;
+		if((currentTimeSpec.tv_nsec - formerTimeSpec.tv_nsec) < 0){
+			intervalTimeSpec.tv_sec --;
+		}
+	
+		if(intervalTimeSpec.tv_sec < AUTO_SAVE_TO_HEAP_SECOND) {
+			return;
+		}
+		memcpy(&formerTimeSpec, &currentTimeSpec, sizeof(struct timespec));
+		if ((memcardFlag==0)&&(memcardFlagOld==0)&&(memcardResetFlag==1)) {
+			emu_set_action(SACTION_RESET_EVENT);
+			memcardResetFlag = 0;
+		}
+		memcardFlagOld = memcardFlag; //Memory Card Flag Save
+		memcardFlag = 0; //Memory Card Flag Clear
+		return;
+	}
+	if (NOT_BUFF_INITIALIZED == gBuffInitialized) {
+		if (InitAutoSave() == -1) return;
+	}
+	else if (CONFIG_SET_OFF == gBuffInitialized) {
+		xprintf("OPT_AUTOSAVE ON! \n");
+		gBuffInitialized = BUFF_INITIALIZED;
+	}
+
+	// check interval time
+	clock_gettime(CLOCK_MONOTONIC, &currentTimeSpec);
+	if((formerTimeSpec.tv_sec == 0) && (formerTimeSpec.tv_nsec == 0)) {
+		memcpy(&formerTimeSpec, &currentTimeSpec, sizeof(struct timespec));
+	}
+
+	intervalTimeSpec.tv_sec = currentTimeSpec.tv_sec - formerTimeSpec.tv_sec;
+	if((currentTimeSpec.tv_nsec - formerTimeSpec.tv_nsec) < 0){
+		intervalTimeSpec.tv_sec --;
+	}
+	
+	if(intervalTimeSpec.tv_sec < AUTO_SAVE_TO_HEAP_SECOND) {
+		return;
+	}
+	memcpy(&formerTimeSpec, &currentTimeSpec, sizeof(struct timespec));
+
+	// Don't get the status while displaying the BIOS screen.
+	if (!resume_play && AUTO_SAVE_TO_HEAP_SECOND * blocking_count < BLOCKING_TIME) {
+		blocking_count++;
+		return;
+	}
+
+	if (memcardFlag == 0) {
+		time_to_sync_state = 1;
+	}
+	if ((memcardFlag==0)&&(memcardFlagOld==0)&&(memcardResetFlag==1)) {
+		emu_set_action(SACTION_RESET_EVENT);
+		memcardResetFlag = 0;
+	}
+	memcardFlagOld = memcardFlag;
+	memcardFlag = 0;
+}
+
+void emu_sync_state2(void) {
+	int count = gLastCount;
+	LOG_Print("emu_sync_state start", count);
+	if(AutoSaveState(count) == 0) {
+		if (gFilledNum < AUTO_SAVE_TO_FILE_COUNT) {
+			gFilledNum ++;
+		}
+		count += 1;
+		if (count >= AUTO_SAVE_TO_FILE_COUNT) {
+			count = 0;
+		}
+		gLastCount = count;
+	}
+	LOG_Print("emu_sync_state end", count);
 }
 
 int LoadState(const char *file) {
@@ -632,6 +1528,7 @@ int LoadState(const char *file) {
 	char header[32];
 	u32 version;
 	boolean hle;
+	disc_change_state last_state;
 
 	f = SaveFuncs.open(file, "rb");
 	if (f == NULL) return -1;
@@ -639,7 +1536,6 @@ int LoadState(const char *file) {
 	SaveFuncs.read(f, header, sizeof(header));
 	SaveFuncs.read(f, &version, sizeof(u32));
 	SaveFuncs.read(f, &hle, sizeof(boolean));
-
 	if (strncmp("STv4 PCSX", header, 9) != 0 || version != SaveVersion) {
 		SaveFuncs.close(f);
 		return -1;
@@ -675,6 +1571,8 @@ int LoadState(const char *file) {
 	SPU_freeze(0, spufP, psxRegs.cycle);
 	free(spufP);
 
+	xprintf("LoadState spu Size [0x%d] \n", Size);
+
 	sioFreeze(f, 0);
 	cdrFreeze(f, 0);
 	psxHwFreeze(f, 0);
@@ -682,7 +1580,23 @@ int LoadState(const char *file) {
 	mdecFreeze(f, 0);
 	new_dyna_freeze(f, 0);
 
+	// load disc change state
+	SaveFuncs.read(f, &last_state, sizeof(disc_change_state));
+	is_disc_change = last_state.enable;
+	is_nop_count = last_state.counting;
+	nop_cnt = last_state.num;
+
 	SaveFuncs.close(f);
+
+	if (g_opts & OPT_AUTOSAVE) {	/* reset auto save buff when load state*/
+		gLastCount = 0;
+		gFilledNum = 0;
+		printf("LoadState reset auto save buff \n");
+	}
+	resume_play = 1;
+
+	pthread_t fadein_thread;
+	pthread_create(&fadein_thread, NULL, &fadein, NULL);
 
 	return 0;
 }

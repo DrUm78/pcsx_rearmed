@@ -13,6 +13,11 @@
 #include <SDL_syswm.h>
 #include "gpu.h"
 
+#if SDL_MAJOR_VERSION == 2
+SDL_Window  *hoge_window;
+SDL_bool     hoge_ret;
+#endif
+
 static SDL_Surface *screen;
 static Display *x11_display;
 
@@ -27,7 +32,11 @@ int vout_init(void)
     return ret;
   }
 
+#if SDL_MAJOR_VERSION == 1
   screen = SDL_SetVideoMode(1024, 512, 32, 0);
+#else
+  screen = SDL_GetWindowSurface(hoge_window);
+#endif
   if (screen == NULL) {
     fprintf(stderr, "SDL_SetVideoMode failed: %s\n", SDL_GetError());
     SDL_Quit();
@@ -35,8 +44,13 @@ int vout_init(void)
   }
 
   SDL_VERSION(&wminfo.version);
+#if SDL_MAJOR_VERSION == 1
   ret = SDL_GetWMInfo(&wminfo);
   if (ret == 1)
+#else
+  hoge_ret = SDL_GetWindowWMInfo(hoge_window, &wminfo);
+  if (hoge_ret == 1)
+#endif
     x11_display = wminfo.info.x11.display;
 
   return 0;

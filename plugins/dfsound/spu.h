@@ -18,3 +18,7 @@
 void ClearWorkingState(void);
 void CALLBACK SPUplayADPCMchannel(xa_decode_t *xap);
 int  CALLBACK SPUplayCDDAchannel(short *pcm, int bytes);
+int  SPUResetStream(void);
+void CALLBACK SPUfadein(void);
+void CALLBACK SPUenableRvbConfig(int val);
+int  SPUisRvbConfigEnabled(void);

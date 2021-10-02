@@ -46,6 +46,7 @@ unsigned short sioReadStat16();
 unsigned short sioReadMode16();
 unsigned short sioReadCtrl16();
 unsigned short sioReadBaud16();
+unsigned short sio1ReadCtrl16();
 
 void netError();
 

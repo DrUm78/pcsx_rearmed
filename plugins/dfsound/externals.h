@@ -240,6 +240,10 @@ typedef struct
 
 extern SPUInfo spu;
 
+extern int xaSave_iLeftVolume;
+extern int xaSave_iRightVolume;
+extern unsigned char State_CdlPause;
+
 void do_samples(unsigned int cycles_to, int do_sync);
 void schedule_next_irq(void);
 
