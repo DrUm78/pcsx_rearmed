@@ -55,7 +55,7 @@ typedef struct {
 
 	unsigned char StatP;
 
-	unsigned char Transfer[DATA_SIZE];
+	unsigned char Transfer[CD_FRAMESIZE_RAW];
 	struct {
 		unsigned char Track;
 		unsigned char Index;
@@ -80,6 +80,7 @@ typedef struct {
 	unsigned char Readed;
 	unsigned char SetlocPending;
 	u32 Reading;
+	u32 TransferIndex;
 
 	unsigned char ResultTN[6];
 	unsigned char ResultTD[4];

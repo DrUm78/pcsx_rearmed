@@ -45,7 +45,6 @@
 //#define CDR_LOG_CMD_IRQ
 
 cdrStruct cdr;
-static unsigned char *pTransfer;
 
 /* CD-ROM magic numbers */
 #define CdlSync        0  /* nocash documentation : "Uh, actually, returns error code 40h = Invalid Command...?" */
@@ -1338,13 +1337,35 @@ void cdrWrite1(unsigned char rt) {
 	}
 }
 
+
+void adjustTransferIndex(void)
+{
+	size_t bufSize = 0;
+	switch (cdr.Mode & (MODE_SIZE_2340 | MODE_SIZE_2328))
+	{
+		case MODE_SIZE_2340:
+			bufSize = 2340;
+		break;
+		case MODE_SIZE_2328:
+			bufSize = 12 + 2328;
+		break;
+		case MODE_SIZE_2048:
+		default:
+			bufSize = 12 + 2048;
+		break;
+	}
+	if (cdr.TransferIndex >= bufSize) cdr.TransferIndex -= bufSize;
+}
+
 unsigned char cdrRead2(void) {
 	unsigned char ret;
 
 	if (cdr.Readed == 0) {
 		ret = 0;
 	} else {
-		ret = *pTransfer++;
+		ret = cdr.Transfer[cdr.TransferIndex];
+		cdr.TransferIndex++;
+		adjustTransferIndex();
 	}
 
 	CDR_LOG_IO("cdr r2: %02x\n", ret);
@@ -1409,16 +1430,16 @@ void cdrWrite3(unsigned char rt) {
 
 	if ((rt & 0x80) && cdr.Readed == 0) {
 		cdr.Readed = 1;
-		pTransfer = cdr.Transfer;
+		cdr.TransferIndex = 0;
 
 		switch (cdr.Mode & 0x30) {
 			case MODE_SIZE_2328:
 			case 0x00:
-				pTransfer += 12;
+				cdr.TransferIndex += 12;
 				break;
 
 			case MODE_SIZE_2340:
-				pTransfer += 0;
+				cdr.TransferIndex += 0;
 				break;
 
 			default:
@@ -1429,7 +1450,7 @@ void cdrWrite3(unsigned char rt) {
 
 void psxDma3(u32 madr, u32 bcr, u32 chcr) {
 	u32 cdsize;
-	int size;
+	int size, i;
 	u8 *ptr;
 
 	CDR_LOG("psxDma3() Log: *** DMA 3 *** %x addr = %x size = %x\n", chcr, madr, bcr);
@@ -1469,17 +1490,15 @@ void psxDma3(u32 madr, u32 bcr, u32 chcr) {
 			- CdlPlay
 			- Spams DMA3 and gets buffer overrun
 			*/
-			size = CD_FRAMESIZE_RAW - (pTransfer - cdr.Transfer);
-			if (size > cdsize)
-				size = cdsize;
-			if (size > 0)
+			for (i = 0; i < cdsize; ++i)
 			{
-				memcpy(ptr, pTransfer, size);
+				ptr[i] = cdr.Transfer[cdr.TransferIndex];
+				cdr.TransferIndex++;
+				adjustTransferIndex();
 			}
 
 			psxCpu->Clear(madr, cdsize / 4);
-			pTransfer += cdsize;
-
+			
 			if( chcr == 0x11400100 ) {
 				HW_DMA3_MADR = SWAPu32(madr + cdsize);
 				CDRDMA_INT( (cdsize/4) / 4 );
@@ -1530,7 +1549,6 @@ void cdrReset() {
 	cdr.Stat = NoIntr;
 	cdr.DriveState = DRIVESTATE_STANDBY;
 	cdr.StatP = STATUS_ROTATING;
-	pTransfer = cdr.Transfer;
 	cdr.SetlocPending = 0;
 	cdr.m_locationChanged = FALSE;
 
@@ -1555,15 +1573,12 @@ int cdrFreeze(void *f, int Mode) {
 	
 	if (Mode == 1) {
 		cdr.ParamP = cdr.ParamC;
-		tmp = pTransfer - cdr.Transfer;
 	}
 
 	gzfreeze(&tmp, sizeof(tmp));
 
 	if (Mode == 0) {
 		getCdInfo();
-
-		pTransfer = cdr.Transfer + tmp;
 
 		// read right sub data
 		tmpp[0] = btoi(cdr.Prev[0]);
