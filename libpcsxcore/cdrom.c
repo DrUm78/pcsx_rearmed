@@ -152,6 +152,7 @@ enum seeked_state {
 };
 
 static struct CdrStat stat;
+static struct SubQ *subq;
 
 static unsigned int msf2sec(const u8 *msf) {
 	return ((msf[0] * 60 + msf[1]) * 75) + msf[2];
@@ -225,6 +226,23 @@ static void sec2msf(unsigned int s, u8 *msf) {
 	cdr.ResultP = 0; \
 	cdr.ResultC = size; \
 	cdr.ResultReady = 1; \
+}
+
+static char cdr_localTime[3];
+
+static void Convert_LocalTime( unsigned char *time )
+{
+	cdr_localTime[0] = btoi(time[0]);
+	cdr_localTime[1] = btoi(time[1]) - 2;
+	cdr_localTime[2] = time[2];
+	// m:s adjustment
+	if( cdr_localTime[1] < 0 )
+	{
+		cdr_localTime[1] += 60;
+		cdr_localTime[0] -= 1;
+	}
+	cdr_localTime[1] = itob(cdr_localTime[1]);
+	cdr_localTime[0] = itob(cdr_localTime[0]);
 }
 
 static void setIrq(void)
@@ -813,10 +831,33 @@ void cdrInterrupt() {
 
 		case CdlGetlocP:
 			SetResultSize(8);
-			memcpy(&cdr.Result, &cdr.subq, 8);
+			subq = (struct SubQ*) CDR_getBufferSub();
 
-			if (!cdr.Play && !cdr.Reading)
-				cdr.Result[1] = 0; // HACK?
+			Convert_LocalTime( cdr.Prev );
+
+			if (subq != NULL) {
+				cdr.Result[0] = subq->TrackNumber;
+				cdr.Result[1] = subq->IndexNumber;
+				memcpy(cdr.Result+2, subq->TrackRelativeAddress, 3);
+				memcpy(cdr.Result+5, subq->AbsoluteAddress, 3);
+
+				// subQ integrity check
+				if( cdr_localTime[0] != cdr.Result[2] ||
+					cdr_localTime[1] != cdr.Result[3] ||
+					cdr_localTime[2] != cdr.Result[4] ||
+					cdr.Prev[0] != cdr.Result[5] ||
+					cdr.Prev[1] != cdr.Result[6] ||
+					cdr.Prev[2] != cdr.Result[7] )
+				{
+					// wipe out time data
+					memset( cdr.Result+2, 0, 3+3 );
+				}
+			} else {
+				cdr.Result[0] = 1;
+				cdr.Result[1] = 1;
+				memcpy( cdr.Result+2, cdr_localTime, 3 );
+				memcpy( cdr.Result+5, cdr.Prev, 3 );
+			}
 			break;
 
 		case CdlReadT: // SetSession?
