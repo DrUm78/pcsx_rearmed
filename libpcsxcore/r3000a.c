@@ -130,10 +130,14 @@ void psxException(u32 code, u32 bd) {
 }
 
 void psxBranchTest() {
+	const uint32_t cycle = psxRegs.cycle;
+	uint32_t lowestTarget = cycle;
+	
 	if ((psxRegs.cycle - psxNextsCounter) >= psxNextCounter)
 		psxRcntUpdate();
 
-	if (psxRegs.interrupt) {
+	//if (psxRegs.interrupt) {
+	if ((psxRegs.interrupt != 0) && (((int32_t)(psxRegs.lowestTarget - cycle)) <= 0)) {
 		if ((psxRegs.interrupt & (1 << PSXINT_SIO)) && !Config.Sio) { // sio
 			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_SIO].sCycle) >= psxRegs.intCycle[PSXINT_SIO].cycle) {
 				psxRegs.interrupt &= ~(1 << PSXINT_SIO);
@@ -206,6 +210,8 @@ void psxBranchTest() {
 				spuUpdate();
 			}
 		}
+		
+		psxRegs.lowestTarget = lowestTarget;
 	}
 
 	if (psxHu32(0x1070) & psxHu32(0x1074)) {

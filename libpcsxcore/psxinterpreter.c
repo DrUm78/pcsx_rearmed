@@ -27,9 +27,11 @@
 #include "psxhle.h"
 #include "debug.h"
 
-static int branch = 0;
-static int branch2 = 0;
-static u32 branchPC;
+boolean m_inDelaySlot = 0;
+struct delay m_delayedLoadInfo[2];
+boolean m_inISR = FALSE;
+boolean m_nextIsDelaySlot = FALSE;
+unsigned m_currentDelayedLoad = 0;
 
 // These macros are used to assemble the repassembler functions
 
@@ -39,7 +41,7 @@ static u32 branchPC;
 #define debugI()
 #endif
 
-void execI();
+boolean execI();
 
 // Subsets
 void (*psxBSC[64])();
@@ -48,6 +50,13 @@ void (*psxREG[32])();
 void (*psxCP0[32])();
 void (*psxCP2[64])(struct psxCP2Regs *regs);
 void (*psxCP2BSC[32])();
+
+void maybeCancelDelayedLoad(uint32_t index)
+{
+	unsigned other = m_currentDelayedLoad ^ 1;
+	if (m_delayedLoadInfo[other].index == index) m_delayedLoadInfo[other].active = FALSE;
+}
+
 
 #ifdef ICACHE_EMULATION
 /*
@@ -108,55 +117,6 @@ uint32_t *Read_ICache(uint32_t pc)
 }
 #endif
 
-static void delayRead(int reg, u32 bpc) {
-	u32 rold, rnew;
-
-//	SysPrintf("delayRead at %x!\n", psxRegs.pc);
-
-	rold = psxRegs.GPR.r[reg];
-	psxBSC[psxRegs.code >> 26](); // branch delay load
-	rnew = psxRegs.GPR.r[reg];
-
-	psxRegs.pc = bpc;
-
-	branch = 0;
-
-	psxRegs.GPR.r[reg] = rold;
-	execI(); // first branch opcode
-	psxRegs.GPR.r[reg] = rnew;
-
-	psxBranchTest();
-}
-
-static void delayWrite(int reg, u32 bpc) {
-
-/*	SysPrintf("delayWrite at %x!\n", psxRegs.pc);
-
-	SysPrintf("%s\n", disR3000AF(psxRegs.code, psxRegs.pc-4));
-	SysPrintf("%s\n", disR3000AF(PSXMu32(bpc), bpc));*/
-
-	// no changes from normal behavior
-
-	psxBSC[psxRegs.code >> 26]();
-
-	branch = 0;
-	psxRegs.pc = bpc;
-
-	psxBranchTest();
-}
-
-static void delayReadWrite(int reg, u32 bpc) {
-
-//	SysPrintf("delayReadWrite at %x!\n", psxRegs.pc);
-
-	// the branch delay load is skipped
-
-	branch = 0;
-	psxRegs.pc = bpc;
-
-	psxBranchTest();
-}
-
 // this defines shall be used with the tmp 
 // of the next func (instead of _Funct_...)
 #define _tFunct_  ((tmp      ) & 0x3F)  // The funct part of the instruction register 
@@ -165,423 +125,60 @@ static void delayReadWrite(int reg, u32 bpc) {
 #define _tRs_     ((tmp >> 21) & 0x1F)  // The rs part of the instruction register 
 #define _tSa_     ((tmp >>  6) & 0x1F)  // The sa part of the instruction register
 
-int psxTestLoadDelay(int reg, u32 tmp) {
-	if (tmp == 0) return 0; // NOP
-	switch (tmp >> 26) {
-		case 0x00: // SPECIAL
-			switch (_tFunct_) {
-				case 0x00: // SLL
-				case 0x02: case 0x03: // SRL/SRA
-					if (_tRd_ == reg && _tRt_ == reg) return 1; else
-					if (_tRt_ == reg) return 2; else
-					if (_tRd_ == reg) return 3;
-					break;
-
-				case 0x08: // JR
-					if (_tRs_ == reg) return 2;
-					break;
-				case 0x09: // JALR
-					if (_tRd_ == reg && _tRs_ == reg) return 1; else
-					if (_tRs_ == reg) return 2; else
-					if (_tRd_ == reg) return 3;
-					break;
-
-				// SYSCALL/BREAK just a break;
-
-				case 0x20: case 0x21: case 0x22: case 0x23:
-				case 0x24: case 0x25: case 0x26: case 0x27: 
-				case 0x2a: case 0x2b: // ADD/ADDU...
-				case 0x04: case 0x06: case 0x07: // SLLV...
-					if (_tRd_ == reg && (_tRt_ == reg || _tRs_ == reg)) return 1; else
-					if (_tRt_ == reg || _tRs_ == reg) return 2; else
-					if (_tRd_ == reg) return 3;
-					break;
-
-				case 0x10: case 0x12: // MFHI/MFLO
-					if (_tRd_ == reg) return 3;
-					break;
-				case 0x11: case 0x13: // MTHI/MTLO
-					if (_tRs_ == reg) return 2;
-					break;
-
-				case 0x18: case 0x19:
-				case 0x1a: case 0x1b: // MULT/DIV...
-					if (_tRt_ == reg || _tRs_ == reg) return 2;
-					break;
-			}
-			break;
-
-		case 0x01: // REGIMM
-			switch (_tRt_) {
-				case 0x00: case 0x01:
-				case 0x10: case 0x11: // BLTZ/BGEZ...
-					// Xenogears - lbu v0 / beq v0
-					// - no load delay (fixes battle loading)
-					break;
-
-					if (_tRs_ == reg) return 2;
-					break;
-			}
-			break;
-
-		// J would be just a break;
-		case 0x03: // JAL
-			if (31 == reg) return 3;
-			break;
-
-		case 0x04: case 0x05: // BEQ/BNE
-			// Xenogears - lbu v0 / beq v0
-			// - no load delay (fixes battle loading)
-			break;
-
-			if (_tRs_ == reg || _tRt_ == reg) return 2;
-			break;
-
-		case 0x06: case 0x07: // BLEZ/BGTZ
-			// Xenogears - lbu v0 / beq v0
-			// - no load delay (fixes battle loading)
-			break;
-
-			if (_tRs_ == reg) return 2;
-			break;
-
-		case 0x08: case 0x09: case 0x0a: case 0x0b:
-		case 0x0c: case 0x0d: case 0x0e: // ADDI/ADDIU...
-			if (_tRt_ == reg && _tRs_ == reg) return 1; else
-			if (_tRs_ == reg) return 2; else
-			if (_tRt_ == reg) return 3;
-			break;
-
-		case 0x0f: // LUI
-			if (_tRt_ == reg) return 3;
-			break;
-
-		case 0x10: // COP0
-			switch (_tFunct_) {
-				case 0x00: // MFC0
-					if (_tRt_ == reg) return 3;
-					break;
-				case 0x02: // CFC0
-					if (_tRt_ == reg) return 3;
-					break;
-				case 0x04: // MTC0
-					if (_tRt_ == reg) return 2;
-					break;
-				case 0x06: // CTC0
-					if (_tRt_ == reg) return 2;
-					break;
-				// RFE just a break;
-			}
-			break;
-
-		case 0x12: // COP2
-			switch (_tFunct_) {
-				case 0x00: 
-					switch (_tRs_) {
-						case 0x00: // MFC2
-							if (_tRt_ == reg) return 3;
-							break;
-						case 0x02: // CFC2
-							if (_tRt_ == reg) return 3;
-							break;
-						case 0x04: // MTC2
-							if (_tRt_ == reg) return 2;
-							break;
-						case 0x06: // CTC2
-							if (_tRt_ == reg) return 2;
-							break;
-					}
-					break;
-				// RTPS... break;
-			}
-			break;
-
-		case 0x22: case 0x26: // LWL/LWR
-			if (_tRt_ == reg) return 3; else
-			if (_tRs_ == reg) return 2;
-			break;
-
-		case 0x20: case 0x21: case 0x23:
-		case 0x24: case 0x25: // LB/LH/LW/LBU/LHU
-			if (_tRt_ == reg && _tRs_ == reg) return 1; else
-			if (_tRs_ == reg) return 2; else
-			if (_tRt_ == reg) return 3;
-			break;
-
-		case 0x28: case 0x29: case 0x2a:
-		case 0x2b: case 0x2e: // SB/SH/SWL/SW/SWR
-			if (_tRt_ == reg || _tRs_ == reg) return 2;
-			break;
-
-		case 0x32: case 0x3a: // LWC2/SWC2
-			if (_tRs_ == reg) return 2;
-			break;
-	}
-
-	return 0;
+static uint32_t* delayedLoadRef(unsigned reg, uint32_t mask) {
+    if (reg >= 32) abort();
+    m_delayedLoadInfo[m_currentDelayedLoad].active = TRUE;
+    m_delayedLoadInfo[m_currentDelayedLoad].index = reg;
+    m_delayedLoadInfo[m_currentDelayedLoad].mask = mask;
+    return &m_delayedLoadInfo[m_currentDelayedLoad].value;
 }
 
-void psxDelayTest(int reg, u32 bpc) {
-	u32 *code;
-	u32 tmp;
 
-	#ifdef ICACHE_EMULATION
-	if (Config.icache_emulation)
-	{
-		code = Read_ICache(psxRegs.pc);
-	}
-	else
-	#endif
-	{
-		code = (u32 *)PSXM(psxRegs.pc);
-	}
+#define DELAY_LOAD(r, m) \
+    m_delayedLoadInfo[m_currentDelayedLoad].active = TRUE; \
+    m_delayedLoadInfo[m_currentDelayedLoad].index = r; \
+    m_delayedLoadInfo[m_currentDelayedLoad].mask = m; \
 
-	tmp = ((code == NULL) ? 0 : SWAP32(*code));
-	branch = 1;
-
-	switch (psxTestLoadDelay(reg, tmp)) {
-		case 1:
-			delayReadWrite(reg, bpc); return;
-		case 2:
-			delayRead(reg, bpc); return;
-		case 3:
-			delayWrite(reg, bpc); return;
-	}
-	psxBSC[psxRegs.code >> 26]();
-
-	branch = 0;
-	psxRegs.pc = bpc;
-
-	psxBranchTest();
+void delayedPCLoad(uint32_t value, boolean fromLink)
+{
+	//auto &delayedLoad = m_delayedLoadInfo[m_currentDelayedLoad];
+	m_delayedLoadInfo[m_currentDelayedLoad].pcActive = TRUE;
+	m_delayedLoadInfo[m_currentDelayedLoad].pcValue = value;
+	m_delayedLoadInfo[m_currentDelayedLoad].fromLink = fromLink;
 }
 
-static u32 psxBranchNoDelay(void) {
-	u32 *code;
-	u32 temp;
-
-	#ifdef ICACHE_EMULATION
-	if (Config.icache_emulation)
-	{
-		code = Read_ICache(psxRegs.pc);
-	}
-	else
-	#endif
-	{
-		code = (u32 *)PSXM(psxRegs.pc);
-	}
-	psxRegs.code = ((code == NULL) ? 0 : SWAP32(*code));
-	switch (_Op_) {
-		case 0x00: // SPECIAL
-			switch (_Funct_) {
-				case 0x08: // JR
-					return _u32(_rRs_);
-				case 0x09: // JALR
-					temp = _u32(_rRs_);
-					if (_Rd_) { _SetLink(_Rd_); }
-					return temp;
-			}
-			break;
-		case 0x01: // REGIMM
-			switch (_Rt_) {
-				case 0x00: // BLTZ
-					if (_i32(_rRs_) < 0)
-						return _BranchTarget_;
-					break;
-				case 0x01: // BGEZ
-					if (_i32(_rRs_) >= 0)
-						return _BranchTarget_;
-					break;
-				case 0x08: // BLTZAL
-					if (_i32(_rRs_) < 0) {
-						_SetLink(31);
-						return _BranchTarget_;
-					}
-					break;
-				case 0x09: // BGEZAL
-					if (_i32(_rRs_) >= 0) {
-						_SetLink(31);
-						return _BranchTarget_;
-					}
-					break;
-			}
-			break;
-		case 0x02: // J
-			return _JumpTarget_;
-		case 0x03: // JAL
-			_SetLink(31);
-			return _JumpTarget_;
-		case 0x04: // BEQ
-			if (_i32(_rRs_) == _i32(_rRt_))
-				return _BranchTarget_;
-			break;
-		case 0x05: // BNE
-			if (_i32(_rRs_) != _i32(_rRt_))
-				return _BranchTarget_;
-			break;
-		case 0x06: // BLEZ
-			if (_i32(_rRs_) <= 0)
-				return _BranchTarget_;
-			break;
-		case 0x07: // BGTZ
-			if (_i32(_rRs_) > 0)
-				return _BranchTarget_;
-			break;
-	}
-
-	return (u32)-1;
-}
-
-static int psxDelayBranchExec(u32 tar) {
-	execI();
-
-	branch = 0;
-	psxRegs.pc = tar;
-	psxRegs.cycle += BIAS;
-	psxBranchTest();
-	return 1;
-}
-
-static int psxDelayBranchTest(u32 tar1) {
-	u32 tar2, tmp1, tmp2;
-
-	tar2 = psxBranchNoDelay();
-	if (tar2 == (u32)-1)
-		return 0;
-
-	debugI();
-
-	/*
-	 * Branch in delay slot:
-	 * - execute 1 instruction at tar1
-	 * - jump to tar2 (target of branch in delay slot; this branch
-	 *   has no normal delay slot, instruction at tar1 was fetched instead)
-	 */
-	psxRegs.pc = tar1;
-	tmp1 = psxBranchNoDelay();
-	if (tmp1 == (u32)-1) {
-		return psxDelayBranchExec(tar2);
-	}
-	debugI();
-	psxRegs.cycle += BIAS;
-
-	/*
-	 * Got a branch at tar1:
-	 * - execute 1 instruction at tar2
-	 * - jump to target of that branch (tmp1)
-	 */
-	psxRegs.pc = tar2;
-	tmp2 = psxBranchNoDelay();
-	if (tmp2 == (u32)-1) {
-		return psxDelayBranchExec(tmp1);
-	}
-	debugI();
-	psxRegs.cycle += BIAS;
-
-	/*
-	 * Got a branch at tar2:
-	 * - execute 1 instruction at tmp1
-	 * - jump to target of that branch (tmp2)
-	 */
-	psxRegs.pc = tmp1;
-	return psxDelayBranchExec(tmp2);
-}
-
-static void doBranch(u32 tar) {
-	u32 *code;
-	u32 tmp;
-
-	branch2 = branch = 1;
-	branchPC = tar;
-
-	// check for branch in delay slot
-	if (psxDelayBranchTest(tar))
-		return;
-
-	#ifdef ICACHE_EMULATION
-	if (Config.icache_emulation)
-	{
-		code = Read_ICache(psxRegs.pc);
-	}
-	else
-	#endif
-	{
-		code = (u32 *)PSXM(psxRegs.pc);
-	}
-	psxRegs.code = ((code == NULL) ? 0 : SWAP32(*code));
-
-	debugI();
-
-	psxRegs.pc += 4;
-	psxRegs.cycle += BIAS;
-
-	// check for load delay
-	tmp = psxRegs.code >> 26;
-	switch (tmp) {
-		case 0x10: // COP0
-			switch (_Rs_) {
-				case 0x00: // MFC0
-				case 0x02: // CFC0
-					psxDelayTest(_Rt_, branchPC);
-					return;
-			}
-			break;
-		case 0x12: // COP2
-			switch (_Funct_) {
-				case 0x00:
-					switch (_Rs_) {
-						case 0x00: // MFC2
-						case 0x02: // CFC2
-							psxDelayTest(_Rt_, branchPC);
-							return;
-					}
-					break;
-			}
-			break;
-		case 0x32: // LWC2
-			psxDelayTest(_Rt_, branchPC);
-			return;
-		default:
-			if (tmp >= 0x20 && tmp <= 0x26) { // LB/LH/LWL/LW/LBU/LHU/LWR
-				psxDelayTest(_Rt_, branchPC);
-				return;
-			}
-			break;
-	}
-
-	psxBSC[psxRegs.code >> 26]();
-
-	branch = 0;
-	psxRegs.pc = branchPC;
-
-	psxBranchTest();
+static void doBranch(uint32_t target, boolean fromLink)
+{
+    m_nextIsDelaySlot = TRUE;
+    delayedPCLoad(target, fromLink);
 }
 
 /*********************************************************
 * Arithmetic with immediate operand                      *
 * Format:  OP rt, rs, immediate                          *
 *********************************************************/
-void psxADDI() 	{ if (!_Rt_) return; _rRt_ = _u32(_rRs_) + _Imm_ ; }		// Rt = Rs + Im 	(Exception on Integer Overflow)
-void psxADDIU() { if (!_Rt_) return; _rRt_ = _u32(_rRs_) + _Imm_ ; }		// Rt = Rs + Im
-void psxANDI() 	{ if (!_Rt_) return; _rRt_ = _u32(_rRs_) & _ImmU_; }		// Rt = Rs And Im
-void psxORI() 	{ if (!_Rt_) return; _rRt_ = _u32(_rRs_) | _ImmU_; }		// Rt = Rs Or  Im
-void psxXORI() 	{ if (!_Rt_) return; _rRt_ = _u32(_rRs_) ^ _ImmU_; }		// Rt = Rs Xor Im
-void psxSLTI() 	{ if (!_Rt_) return; _rRt_ = _i32(_rRs_) < _Imm_ ; }		// Rt = Rs < Im		(Signed)
-void psxSLTIU() { if (!_Rt_) return; _rRt_ = _u32(_rRs_) < ((u32)_Imm_); }		// Rt = Rs < Im		(Unsigned)
+void psxADDI() 	{ if (!_Rt_) return; maybeCancelDelayedLoad(_Rt_); _rRt_ = _u32(_rRs_) + _Imm_ ; }		// Rt = Rs + Im 	(Exception on Integer Overflow)
+void psxADDIU() { if (!_Rt_) return; maybeCancelDelayedLoad(_Rt_); _rRt_ = _u32(_rRs_) + _Imm_ ; }		// Rt = Rs + Im
+void psxANDI() 	{ if (!_Rt_) return; maybeCancelDelayedLoad(_Rt_); _rRt_ = _u32(_rRs_) & _ImmU_; }		// Rt = Rs And Im
+void psxORI() 	{ if (!_Rt_) return; maybeCancelDelayedLoad(_Rt_); _rRt_ = _u32(_rRs_) | _ImmU_; }		// Rt = Rs Or  Im
+void psxXORI() 	{ if (!_Rt_) return; maybeCancelDelayedLoad(_Rt_); _rRt_ = _u32(_rRs_) ^ _ImmU_; }		// Rt = Rs Xor Im
+void psxSLTI() 	{ if (!_Rt_) return; maybeCancelDelayedLoad(_Rt_); _rRt_ = _i32(_rRs_) < _Imm_ ; }		// Rt = Rs < Im		(Signed)
+void psxSLTIU() { if (!_Rt_) return; maybeCancelDelayedLoad(_Rt_); _rRt_ = _u32(_rRs_) < ((u32)_Imm_); }		// Rt = Rs < Im		(Unsigned)
 
 /*********************************************************
 * Register arithmetic                                    *
 * Format:  OP rd, rs, rt                                 *
 *********************************************************/
-void psxADD()	{ if (!_Rd_) return; _rRd_ = _u32(_rRs_) + _u32(_rRt_); }	// Rd = Rs + Rt		(Exception on Integer Overflow)
-void psxADDU() 	{ if (!_Rd_) return; _rRd_ = _u32(_rRs_) + _u32(_rRt_); }	// Rd = Rs + Rt
-void psxSUB() 	{ if (!_Rd_) return; _rRd_ = _u32(_rRs_) - _u32(_rRt_); }	// Rd = Rs - Rt		(Exception on Integer Overflow)
-void psxSUBU() 	{ if (!_Rd_) return; _rRd_ = _u32(_rRs_) - _u32(_rRt_); }	// Rd = Rs - Rt
-void psxAND() 	{ if (!_Rd_) return; _rRd_ = _u32(_rRs_) & _u32(_rRt_); }	// Rd = Rs And Rt
-void psxOR() 	{ if (!_Rd_) return; _rRd_ = _u32(_rRs_) | _u32(_rRt_); }	// Rd = Rs Or  Rt
-void psxXOR() 	{ if (!_Rd_) return; _rRd_ = _u32(_rRs_) ^ _u32(_rRt_); }	// Rd = Rs Xor Rt
-void psxNOR() 	{ if (!_Rd_) return; _rRd_ =~(_u32(_rRs_) | _u32(_rRt_)); }// Rd = Rs Nor Rt
-void psxSLT() 	{ if (!_Rd_) return; _rRd_ = _i32(_rRs_) < _i32(_rRt_); }	// Rd = Rs < Rt		(Signed)
-void psxSLTU() 	{ if (!_Rd_) return; _rRd_ = _u32(_rRs_) < _u32(_rRt_); }	// Rd = Rs < Rt		(Unsigned)
+void psxADD()	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ = _u32(_rRs_) + _u32(_rRt_); }	// Rd = Rs + Rt		(Exception on Integer Overflow)
+void psxADDU() 	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ = _u32(_rRs_) + _u32(_rRt_); }	// Rd = Rs + Rt
+void psxSUB() 	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ = _u32(_rRs_) - _u32(_rRt_); }	// Rd = Rs - Rt		(Exception on Integer Overflow)
+void psxSUBU() 	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ = _u32(_rRs_) - _u32(_rRt_); }	// Rd = Rs - Rt
+void psxAND() 	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ = _u32(_rRs_) & _u32(_rRt_); }	// Rd = Rs And Rt
+void psxOR() 	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ = _u32(_rRs_) | _u32(_rRt_); }	// Rd = Rs Or  Rt
+void psxXOR() 	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ = _u32(_rRs_) ^ _u32(_rRt_); }	// Rd = Rs Xor Rt
+void psxNOR() 	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ =~(_u32(_rRs_) | _u32(_rRt_)); }// Rd = Rs Nor Rt
+void psxSLT() 	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ = _i32(_rRs_) < _i32(_rRt_); }	// Rd = Rs < Rt		(Signed)
+void psxSLTU() 	{ if (!_Rd_) return; maybeCancelDelayedLoad(_Rd_); _rRd_ = _u32(_rRs_) < _u32(_rRt_); }	// Rd = Rs < Rt		(Unsigned)
 
 /*********************************************************
 * Register mult/div & Register trap logic                *
@@ -637,11 +234,20 @@ void psxMULTU() {
 }
 
 /*********************************************************
-* Register branch logic                                  *
+* Register m_inDelaySlot logic                                  *
 * Format:  OP rs, offset                                 *
 *********************************************************/
-#define RepZBranchi32(op)      if(_i32(_rRs_) op 0) doBranch(_BranchTarget_);
-#define RepZBranchLinki32(op)  { _SetLink(31); if(_i32(_rRs_) op 0) { doBranch(_BranchTarget_); } }
+#define RepZBranchi32(op)      if(_i32(_rRs_) op 0) doBranch(_BranchTarget_, FALSE);
+
+#define RepZBranchLinki32(op)                                    \
+    {                                                            \
+        uint32_t ra = psxRegs.pc + 4;                          \
+        psxRegs.GPR.r[31] = ra;                                \
+        maybeCancelDelayedLoad(31);                              \
+        if (_i32(_rRs_) op 0) {                                  \
+            doBranch(_BranchTarget_, TRUE);                      \
+        }                                                        \
+    }
 
 void psxBGEZ()   { RepZBranchi32(>=) }      // Branch if Rs >= 0
 void psxBGEZAL() { RepZBranchLinki32(>=) }  // Branch if Rs >= 0 and link
@@ -692,12 +298,20 @@ void psxMTLO() { _rLo_ = _rRs_; } // Lo = Rs
 *********************************************************/
 void psxBREAK() {
 	psxRegs.pc -= 4;
-	psxException(0x24, branch);
+	psxException(0x24, m_inDelaySlot);
+    if (m_inDelaySlot) {
+        if (!m_delayedLoadInfo[m_currentDelayedLoad].pcActive) abort();
+        m_delayedLoadInfo[m_currentDelayedLoad].pcActive = FALSE;
+    }
 }
 
 void psxSYSCALL() {
 	psxRegs.pc -= 4;
-	psxException(0x20, branch);
+	psxException(0x20, m_inDelaySlot);
+    if (m_inDelaySlot) {
+        if (!m_delayedLoadInfo[m_currentDelayedLoad].pcActive) abort();
+        m_delayedLoadInfo[m_currentDelayedLoad].pcActive = FALSE;
+    }
 }
 
 void psxRFE() {
@@ -708,10 +322,10 @@ void psxRFE() {
 }
 
 /*********************************************************
-* Register branch logic                                  *
+* Register m_inDelaySlot logic                                  *
 * Format:  OP rs, rt, offset                             *
 *********************************************************/
-#define RepBranchi32(op)      if(_i32(_rRs_) op _i32(_rRt_)) doBranch(_BranchTarget_);
+#define RepBranchi32(op)      if(_i32(_rRs_) op _i32(_rRt_)) doBranch(_BranchTarget_, FALSE);
 
 void psxBEQ() {	RepBranchi32(==) }  // Branch if Rs == Rt
 void psxBNE() {	RepBranchi32(!=) }  // Branch if Rs != Rt
@@ -720,22 +334,33 @@ void psxBNE() {	RepBranchi32(!=) }  // Branch if Rs != Rt
 * Jump to target                                         *
 * Format:  OP target                                     *
 *********************************************************/
-void psxJ()   {               doBranch(_JumpTarget_); }
-void psxJAL() {	_SetLink(31); doBranch(_JumpTarget_); }
+void psxJ()   {               doBranch(_JumpTarget_, FALSE); }
+void psxJAL()
+{
+    maybeCancelDelayedLoad(31);
+    uint32_t ra = psxRegs.pc + 4;
+    psxRegs.GPR.r[31] = ra;
+	doBranch(_JumpTarget_, TRUE);
+}
 
 /*********************************************************
 * Register jump                                          *
 * Format:  OP rs, rd                                     *
 *********************************************************/
 void psxJR()   {
-	doBranch(_rRs_ & ~3);
+	doBranch(_rRs_ & ~3, FALSE);
 	psxJumpTest();
 }
 
 void psxJALR() {
 	u32 temp = _u32(_rRs_);
-	if (_Rd_) { _SetLink(_Rd_); }
-	doBranch(temp & ~3);
+	if (_Rd_)
+	{
+		maybeCancelDelayedLoad(_Rd_);
+		uint32_t ra = psxRegs.pc + 4;
+		_rRd_ = ra;
+	}
+	doBranch(temp & ~3, TRUE);
 }
 
 /*********************************************************
@@ -747,7 +372,8 @@ void psxJALR() {
 
 void psxLB() {
 	if (_Rt_) {
-		_i32(_rRt_) = (signed char)psxMemRead8(_oB_); 
+		DELAY_LOAD(_Rt_, 0);
+		_i32(m_delayedLoadInfo[m_currentDelayedLoad].value) = (signed char)psxMemRead8(_oB_);	
 	} else {
 		psxMemRead8(_oB_); 
 	}
@@ -755,7 +381,8 @@ void psxLB() {
 
 void psxLBU() {
 	if (_Rt_) {
-		_u32(_rRt_) = psxMemRead8(_oB_);
+		DELAY_LOAD(_Rt_, 0);
+		_u32(m_delayedLoadInfo[m_currentDelayedLoad].value) = psxMemRead8(_oB_);	
 	} else {
 		psxMemRead8(_oB_); 
 	}
@@ -763,7 +390,8 @@ void psxLBU() {
 
 void psxLH() {
 	if (_Rt_) {
-		_i32(_rRt_) = (short)psxMemRead16(_oB_);
+		DELAY_LOAD(_Rt_, 0);
+		_i32(m_delayedLoadInfo[m_currentDelayedLoad].value) = (short)psxMemRead16(_oB_);
 	} else {
 		psxMemRead16(_oB_);
 	}
@@ -771,7 +399,8 @@ void psxLH() {
 
 void psxLHU() {
 	if (_Rt_) {
-		_u32(_rRt_) = psxMemRead16(_oB_);
+		DELAY_LOAD(_Rt_, 0);
+		_u32(m_delayedLoadInfo[m_currentDelayedLoad].value) = psxMemRead16(_oB_);
 	} else {
 		psxMemRead16(_oB_);
 	}
@@ -779,7 +408,8 @@ void psxLHU() {
 
 void psxLW() {
 	if (_Rt_) {
-		_u32(_rRt_) = psxMemRead32(_oB_);
+		DELAY_LOAD(_Rt_, 0);
+		_u32(m_delayedLoadInfo[m_currentDelayedLoad].value) = psxMemRead32(_oB_);
 	} else {
 		psxMemRead32(_oB_);
 	}
@@ -794,8 +424,9 @@ void psxLWL() {
 	u32 mem = psxMemRead32(addr & ~3);
 
 	if (!_Rt_) return;
-	_u32(_rRt_) =	( _u32(_rRt_) & LWL_MASK[shift]) | 
-					( mem << LWL_SHIFT[shift]);
+	
+	DELAY_LOAD(_Rt_, LWL_MASK[shift]);
+	_u32(m_delayedLoadInfo[m_currentDelayedLoad].value) = mem >> LWL_SHIFT[shift];	
 
 	/*
 	Mem = 1234.  Reg = abcd
@@ -816,8 +447,10 @@ void psxLWR() {
 	u32 mem = psxMemRead32(addr & ~3);
 
 	if (!_Rt_) return;
-	_u32(_rRt_) =	( _u32(_rRt_) & LWR_MASK[shift]) | 
-					( mem >> LWR_SHIFT[shift]);
+	
+	DELAY_LOAD(_Rt_, LWR_MASK[shift]);
+	// _u32(delayedLoadRef(_Rt_, LWR_MASK[shift])) = mem >> LWR_SHIFT[shift];
+	_u32(m_delayedLoadInfo[m_currentDelayedLoad].value) = mem >> LWR_SHIFT[shift];	
 
 	/*
 	Mem = 1234.  Reg = abcd
@@ -878,14 +511,31 @@ void psxSWR() {
 * Moves between GPR and COPx                             *
 * Format:  OP rt, fs                                     *
 *********************************************************/
-void psxMFC0() { if (!_Rt_) return; _i32(_rRt_) = (int)_rFs_; }
-void psxCFC0() { if (!_Rt_) return; _i32(_rRt_) = (int)_rFs_; }
+void psxMFC0()
+{
+    // load delay = 1 latency
+    if (!_Rt_) return;
+
+	DELAY_LOAD(_Rt_, 0);
+	_i32(m_delayedLoadInfo[m_currentDelayedLoad].value) = (int)_rFs_;
+}
+
+void psxCFC0()
+{
+    // load delay = 1 latency
+    if (!_Rt_) return;
+    
+	DELAY_LOAD(_Rt_, 0);
+	_i32(m_delayedLoadInfo[m_currentDelayedLoad].value) = (int)_rFs_;
+}
 
 void psxTestSWInts() {
 	if (psxRegs.CP0.n.Cause & psxRegs.CP0.n.Status & 0x0300 &&
 	   psxRegs.CP0.n.Status & 0x1) {
-		psxRegs.CP0.n.Cause &= ~0x7c;
-		psxException(psxRegs.CP0.n.Cause, branch);
+		//psxRegs.CP0.n.Cause &= ~0x7c;
+        boolean inDelaySlot = m_inDelaySlot;
+        m_inDelaySlot = FALSE;
+		psxException(psxRegs.CP0.n.Cause, inDelaySlot);
 	}
 }
 
@@ -893,13 +543,12 @@ void MTC0(int reg, u32 val) {
 //	SysPrintf("MTC0 %d: %x\n", reg, val);
 	switch (reg) {
 		case 12: // Status
-			psxRegs.CP0.r[12] = val;
+			psxRegs.CP0.n.Status = val;
 			psxTestSWInts();
 			break;
 
 		case 13: // Cause
-			psxRegs.CP0.n.Cause &= ~0x0300;
-			psxRegs.CP0.n.Cause |= val & 0x0300;
+			psxRegs.CP0.n.Cause = val & ~(0xfc00);
 			psxTestSWInts();
 			break;
 
@@ -911,6 +560,20 @@ void MTC0(int reg, u32 val) {
 
 void psxMTC0() { MTC0(_Rd_, _u32(_rRt_)); }
 void psxCTC0() { MTC0(_Rd_, _u32(_rRt_)); }
+
+/*
+void psxMFC2(uint32_t code) {
+    // load delay = 1 latency
+    
+	//_i32(_Rt_) = psxCP2BSC[0]();
+	//delayedLoadRef(_Rt_, 0) = psxCP2BSC[0]();
+}
+
+void psxCFC2(uint32_t code) {
+    // load delay = 1 latency
+	//_i32(_Rt_) = psxCP2BSC[2]();
+}
+*/
 
 /*********************************************************
 * Unknow instruction (would generate an exception)       *
@@ -1044,17 +707,24 @@ static void intReset() {
 	memset(ICache_Addr, 0xff, 0x1000);
 	memset(ICache_Code, 0xff, 0x1000);
 	#endif
+    m_nextIsDelaySlot = FALSE;
+    m_inDelaySlot = FALSE;
+    m_delayedLoadInfo[0].active = FALSE;
+    m_delayedLoadInfo[1].active = FALSE;
+    m_delayedLoadInfo[0].pcActive = FALSE;
+    m_delayedLoadInfo[1].pcActive = FALSE;
 }
 
 void intExecute() {
 	extern int stop;
-	for (;!stop;) 
-		execI();
+	for (;!stop;)
+	{
+		while (!execI());
+	}
 }
 
 void intExecuteBlock() {
-	branch2 = 0;
-	while (!branch2) execI();
+    while (!execI());
 }
 
 static void intClear(u32 Addr, u32 Size) {
@@ -1088,13 +758,19 @@ static void intShutdown() {
 }
 
 // interpreter execution
-void execI() {
+boolean execI() {
 	u32 *code;
-	#ifdef ICACHE_EMULATION
-	if (Config.icache_emulation)
+	
+	boolean ranDelaySlot = FALSE;
+
+	if (m_nextIsDelaySlot)
 	{
-		code = Read_ICache(psxRegs.pc);
+		m_inDelaySlot = TRUE;
+		m_nextIsDelaySlot = FALSE;
 	}
+		
+	#ifdef ICACHE_EMULATION
+	if (Config.icache_emulation) code = Read_ICache(psxRegs.pc);
 	else
 	#endif
 	{
@@ -1105,11 +781,33 @@ void execI() {
 	debugI();
 
 	if (Config.Debug) ProcessDebug();
-
 	psxRegs.pc += 4;
 	psxRegs.cycle += BIAS;
 
 	psxBSC[psxRegs.code >> 26]();
+		
+	m_currentDelayedLoad ^= 1;
+	//printf("m_currentDelayedLoad %d\n", m_currentDelayedLoad);
+	if (m_delayedLoadInfo[m_currentDelayedLoad].active)
+	{
+		uint32_t reg = psxRegs.GPR.r[m_delayedLoadInfo[m_currentDelayedLoad].index];
+		reg &= m_delayedLoadInfo[m_currentDelayedLoad].mask;
+		reg |= m_delayedLoadInfo[m_currentDelayedLoad].value;
+		psxRegs.GPR.r[m_delayedLoadInfo[m_currentDelayedLoad].index] = reg;
+		m_delayedLoadInfo[m_currentDelayedLoad].active = FALSE;
+	}
+	if (m_delayedLoadInfo[m_currentDelayedLoad].pcActive) {
+		psxRegs.pc = m_delayedLoadInfo[m_currentDelayedLoad].pcValue;
+		m_delayedLoadInfo[m_currentDelayedLoad].pcActive = FALSE;
+		m_delayedLoadInfo[m_currentDelayedLoad].fromLink = FALSE;
+	}
+	if (m_inDelaySlot) {
+		m_inDelaySlot = FALSE;
+		ranDelaySlot = TRUE;
+		psxBranchTest();
+	}
+	
+	return ranDelaySlot;
 }
 
 R3000Acpu psxInt = {

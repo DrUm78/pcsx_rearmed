@@ -54,6 +54,20 @@ extern R3000Acpu *psxCpu;
 extern R3000Acpu psxInt;
 extern R3000Acpu psxRec;
 
+extern boolean m_inISR;
+extern boolean m_nextIsDelaySlot;
+extern boolean m_inDelaySlot;
+struct delay {
+        uint32_t index;
+        uint32_t value;
+        uint32_t mask;
+        uint32_t pcValue;
+        boolean active;
+        boolean pcActive;
+        boolean fromLink;
+};
+extern unsigned m_currentDelayedLoad;
+
 typedef union {
 #if defined(__BIGENDIAN__)
 	struct { u8 h3, h2, h, l; } b;
@@ -193,6 +207,7 @@ typedef struct {
 	u32 cycle;
 	u32 interrupt;
 	struct { u32 sCycle, cycle; } intCycle[32];
+	u32 lowestTarget;
 } psxRegisters;
 
 extern psxRegisters psxRegs;
@@ -283,8 +298,6 @@ void new_dyna_freeze(void *f, int mode);
 
 #define _JumpTarget_    ((_Target_ * 4) + (_PC_ & 0xf0000000))   // Calculates the target during a jump instruction
 #define _BranchTarget_  ((s16)_Im_ * 4 + _PC_)                 // Calculates the target during a branch instruction
-
-#define _SetLink(x)     psxRegs.GPR.r[x] = _PC_ + 4;       // Sets the return address in the link register
 
 int  psxInit();
 void psxReset();
