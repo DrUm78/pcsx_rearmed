@@ -3019,17 +3019,6 @@ void psxBiosInit() {
 	//biosC0[0x1c] = psxBios_PatchAOTable;
 //************** THE END ***************************************
 /**/
-	base = 0x1000;
-	size = sizeof(EvCB) * 32;
-	Event = (void *)&psxR[base]; base += size * 6;
-	memset(Event, 0, size * 6);
-	HwEV = Event;
-	EvEV = Event + 32;
-	RcEV = Event + 32 * 2;
-	UeEV = Event + 32 * 3;
-	SwEV = Event + 32 * 4;
-	ThEV = Event + 32 * 5;
-
 	ptr = (u32 *)&psxM[0x0874]; // b0 table
 	ptr[0] = SWAPu32(0x4c54 - 0x884);
 
@@ -3058,25 +3047,43 @@ void psxBiosInit() {
 	psxMu32ref(0x0154) = SWAPu32(0x320);
 	psxMu32ref(0x0160) = SWAPu32(0x248);
 	strcpy((char *)&psxM[0x248], "bu");
-/*	psxMu32ref(0x0ca8) = SWAPu32(0x1f410004);
-	psxMu32ref(0x0cf0) = SWAPu32(0x3c020000);
-	psxMu32ref(0x0cf4) = SWAPu32(0x2442641c);
-	psxMu32ref(0x09e0) = SWAPu32(0x43d0);
-	psxMu32ref(0x4d98) = SWAPu32(0x946f000a);
-*/
-	// opcode HLE
-	psxRu32ref(0x0000) = SWAPu32((0x3b << 26) | 4);
-	/* Whatever this does, it actually breaks CTR, even without the uninitiliazed memory patch. 
-	Normally games shouldn't read from address 0 yet they do. See explanation below in details. */
-	//psxMu32ref(0x0000) = SWAPu32((0x3b << 26) | 0);
-	psxMu32ref(0x00a0) = SWAPu32((0x3b << 26) | 1);
-	psxMu32ref(0x00b0) = SWAPu32((0x3b << 26) | 2);
-	psxMu32ref(0x00c0) = SWAPu32((0x3b << 26) | 3);
-	psxMu32ref(0x4c54) = SWAPu32((0x3b << 26) | 0);
-	psxMu32ref(0x8000) = SWAPu32((0x3b << 26) | 5);
-	psxMu32ref(0x07a0) = SWAPu32((0x3b << 26) | 0);
-	psxMu32ref(0x0884) = SWAPu32((0x3b << 26) | 0);
-	psxMu32ref(0x0894) = SWAPu32((0x3b << 26) | 0);
+
+	// Each are prepended with a nop to ensure any potential delayed load will be completed.
+	// They will each change PC directly, either by returning to ra, or by returning to EPC.
+	// ??
+	psxMu32ref(0x0000) = 0;
+	psxMu32ref(0x0004) = SWAPu32((0x3b << 26) | 0);
+	// exception handler
+	psxMu32ref(0x0080) = SWAPu32(0x3c1a0000);  // lui   $k0, 0x0000
+	psxMu32ref(0x0084) = SWAPu32(0x275a0090);  // addiu $k0, 0x0090
+	psxMu32ref(0x0088) = SWAPu32(0x03400008);  // jr    $k0
+	psxMu32ref(0x008c) = SWAPu32(0x275a0008);  // addiu $k0, 0x0008
+	psxMu32ref(0x0090) = SWAPu32(0x03400008);  // jr    $k0
+	psxMu32ref(0x0094) = SWAPu32((0x3b << 26) | 6);
+	// a0 calls handler
+	psxMu32ref(0x00a0) = 0;
+	psxMu32ref(0x00a4) = SWAPu32((0x3b << 26) | 1);
+	// b0 calls handler
+	psxMu32ref(0x00b0) = 0;
+	psxMu32ref(0x00b4) = SWAPu32((0x3b << 26) | 2);
+	// c0 calls handler
+	psxMu32ref(0x00c0) = 0;
+	psxMu32ref(0x00c4) = SWAPu32((0x3b << 26) | 3);
+	// ??
+	psxMu32ref(0x4c54) = 0;
+	psxMu32ref(0x4c58) = SWAPu32((0x3b << 26) | 0);
+	// Exec return (a0 call 43)
+	psxMu32ref(0x8000) = 0;
+	psxMu32ref(0x8004) = SWAPu32((0x3b << 26) | 5);
+	// ??
+	psxMu32ref(0x07a0) = 0;
+	psxMu32ref(0x07a4) = SWAPu32((0x3b << 26) | 0);
+	// ??
+	psxMu32ref(0x0884) = 0;
+	psxMu32ref(0x0888) = SWAPu32((0x3b << 26) | 0);
+	// ??
+	psxMu32ref(0x0894) = 0;
+	psxMu32ref(0x0898) = SWAPu32((0x3b << 26) | 0);
 
 	// initial stack pointer for BIOS interrupt
 	psxMu32ref(0x6c80) = SWAPu32(0x000085c8);
@@ -3084,16 +3091,25 @@ void psxBiosInit() {
 	// initial RNG seed
 	psxMu32ref(0x9010) = SWAPu32(0xac20cc00);
 
-	// fonts
-	len = 0x80000 - 0x66000;
-	uncompress((Bytef *)(psxR + 0x66000), &len, font_8140, sizeof(font_8140));
-	len = 0x80000 - 0x69d68;
-	uncompress((Bytef *)(psxR + 0x69d68), &len, font_889f, sizeof(font_889f));
-
 	// memory size 2 MB
 	psxHu32ref(0x1060) = SWAPu32(0x00000b88);
 
 	hleSoftCall = FALSE;
+
+	base = 0x1000;
+	size = sizeof(EvCB) * 32;
+	Event = (EvCB *)&psxR[base];
+	HwEV = Event;
+	EvEV = Event + 32;
+	RcEV = Event + 32 * 2;
+	UeEV = Event + 32 * 3;
+	SwEV = Event + 32 * 4;
+	ThEV = Event + 32 * 5;
+	memset(Event, 0, size * 6);
+
+	// bootstrap
+	psxHu32ref(0x1060) = SWAPu32(0x00000b88);
+
 	
 	/*	Some games like R-Types, CTR, Fade to Black read from adress 0x00000000 due to uninitialized pointers.
 		See Garbage Area at Address 00000000h in Nocash PSX Specfications for more information.
@@ -3110,6 +3126,16 @@ void psxBiosInit() {
 	psxMu32ref(0x0004) = SWAPu32(0x800C5A27);
 	psxMu32ref(0x0008) = SWAPu32(0x08000403);
 	psxMu32ref(0x000C) = SWAPu32(0x00000000);
+	
+	// exception handler
+	psxRu32ref(0x0180) = 0;
+	psxRu32ref(0x0184) = SWAPu32((0x3b << 26) | 6);
+
+	// fonts
+	len = 0x80000 - 0x66000;
+	uncompress((Bytef *)(psxR + 0x66000), &len, font_8140, sizeof(font_8140));
+	len = 0x80000 - 0x69d68;
+	uncompress((Bytef *)(psxR + 0x69d68), &len, font_889f, sizeof(font_889f));
 }
 
 void psxBiosShutdown() {

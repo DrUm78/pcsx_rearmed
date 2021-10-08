@@ -89,8 +89,12 @@ static void hleExecRet() {
 	psxRegs.pc = psxRegs.GPR.n.ra;
 }
 
+static void hleException() {
+	psxBiosException();
+}
+
 const void (*psxHLEt[8])() = {
 	hleDummy, hleA0, hleB0, hleC0,
 	hleBootstrap, hleExecRet,
-	hleDummy, hleDummy
+	hleException, hleDummy
 };
