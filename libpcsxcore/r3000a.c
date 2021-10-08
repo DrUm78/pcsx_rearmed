@@ -125,6 +125,9 @@ void psxException(u32 code, u32 bd) {
 	// Set the Status
 	psxRegs.CP0.n.Status = (psxRegs.CP0.n.Status &~0x3f) |
 						  ((psxRegs.CP0.n.Status & 0xf) << 2);
+		
+	/* Still needed for Klonoa */				  
+	if (Config.HLE) psxBiosException();
 }
 
 void psxBranchTest() {

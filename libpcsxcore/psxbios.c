@@ -1770,17 +1770,17 @@ void psxBios_WaitEvent() { // 0a
 #ifdef PSXBIOS_LOG
 	PSXBIOS_LOG("psxBios_%s %x,%x\n", biosB0n[0x0a], ev, spec);
 #endif
-	if (Event[ev][spec].status == EvStUNUSED)
+	if (Event[ev][spec].status == EvStALREADY)
 	{
-		v0 = 0;
+		Event[ev][spec].status = EvStACTIVE;
+		v0 = 1;
 		pc0 = ra;	
 		return;
 	}
 
-	if (Event[ev][spec].status == EvStALREADY) 
+	if (Event[ev][spec].status == EvStACTIVE) 
 	{
-		/* Callback events (mode=EvMdINTR) do never set the ready flag (and thus WaitEvent would hang forever). */
-		if (!(Event[ev][spec].mode == EvMdINTR)) Event[ev][spec].status = EvStACTIVE;
+		Event[ev][spec].status = EvStACTIVE;
 		v0 = 1;
 		pc0 = ra;
 		return;
@@ -1798,7 +1798,7 @@ void psxBios_TestEvent() { // 0b
 
 	if (Event[ev][spec].status == EvStALREADY) 
 	{
-		if (!(Event[ev][spec].mode == EvMdINTR)) Event[ev][spec].status = EvStACTIVE;
+		Event[ev][spec].status = EvStACTIVE;
 		v0 = 1;
 	} 
 	else 
@@ -2662,6 +2662,43 @@ void psxBios_SysDeqIntRP() { // 03
 	v0 = 0; pc0 = ra;
 }
 
+/* This one is probably wrong */
+void psxBios_get_free_EvCB_slot() { // 04
+#ifdef PSXBIOS_LOG
+	PSXBIOS_LOG("psxBios_%s: %x\n", biosC0n[0x04], a0);
+#endif
+	int ev, spec;
+	for (ev=0; ev<32; ev++)
+	{
+		if (Event[ev][0].status == 0)
+		{
+			v0 = ev;
+			pc0 = ra;
+			return;
+		}
+	}
+	v0 = -1;
+	pc0 = ra;
+}
+
+void psxBios_get_free_TCB_slot() { // 05
+#ifdef PSXBIOS_LOG
+	PSXBIOS_LOG("psxBios_%s: %x\n", biosC0n[0x05], a0);
+#endif
+	uint8_t th;
+	for (th=1; th<8; th++)
+	{
+		if (Thread[th].status == 0)
+		{
+			v0 = th;
+			pc0 = ra;
+			return;
+		}
+	}
+	v0 = -1;
+	pc0 = ra;
+}
+
 void psxBios_ChangeClearRCnt() { // 0a
 	u32 *ptr;
 
@@ -2992,8 +3029,8 @@ void psxBiosInit() {
 	//biosC0[0x01] = psxBios_InitException;
 	biosC0[0x02] = psxBios_SysEnqIntRP;
 	biosC0[0x03] = psxBios_SysDeqIntRP;
-	//biosC0[0x04] = psxBios_get_free_EvCB_slot;
-	//biosC0[0x05] = psxBios_get_free_TCB_slot;
+	biosC0[0x04] = psxBios_get_free_EvCB_slot;
+	biosC0[0x05] = psxBios_get_free_TCB_slot;
 	//biosC0[0x06] = psxBios_ExceptionHandler;
 	//biosC0[0x07] = psxBios_InstallExeptionHandler;
 	//biosC0[0x08] = psxBios_SysInitMemory;
@@ -3028,6 +3065,8 @@ void psxBiosInit() {
 	memset(SysIntRP, 0, sizeof(SysIntRP));
 	memset(Thread, 0, sizeof(Thread));
 	Thread[0].status = 2; // main thread
+	
+	psxRegs.CP0.n.Status &= ~0x401;
 
 	pad_stopped = 1;
 	jmp_int = NULL;
