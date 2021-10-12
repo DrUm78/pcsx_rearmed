@@ -490,12 +490,12 @@ FUNCTION(do_interrupt):
 	.align	2
 FUNCTION(fp_exception):
 	mov	r2, #0x10000000
+	add	r2, r2, #0x2c
 .E7:
 	ldr	r1, [fp, #LO_reg_cop0+48] /* Status */
 	mov	r3, #0x80000000
 	str	r0, [fp, #LO_reg_cop0+56] /* EPC */
 	orr	r1, #2
-	add	r2, r2, #0x2c
 	str	r1, [fp, #LO_reg_cop0+48] /* Status */
 	str	r2, [fp, #LO_reg_cop0+52] /* Cause */
 	add	r0, r3, #0x80
@@ -505,21 +505,12 @@ FUNCTION(fp_exception):
 	.align	2
 FUNCTION(fp_exception_ds):
 	mov	r2, #0x90000000 /* Set high bit if delay slot */
+	add	r2, r2, #0x2c
 	b	.E7
 	.size	fp_exception_ds, .-fp_exception_ds
 
 	.align	2
 FUNCTION(jump_syscall):
-	ldr	r1, [fp, #LO_reg_cop0+48] /* Status */
-	mov	r3, #0x80000000
-	str	r0, [fp, #LO_reg_cop0+56] /* EPC */
-	orr	r1, #2
-	mov	r2, #0x20
-	str	r1, [fp, #LO_reg_cop0+48] /* Status */
-	str	r2, [fp, #LO_reg_cop0+52] /* Cause */
-	add	r0, r3, #0x80
-	bl	get_addr_ht
-	mov	pc, r0
 	.size	jump_syscall, .-jump_syscall
 	.align	2
 
