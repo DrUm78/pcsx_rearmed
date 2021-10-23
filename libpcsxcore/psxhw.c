@@ -436,6 +436,8 @@ void psxHwWrite16(u32 add, u16 value) {
 #ifdef PSXHW_LOG
 			PSXHW_LOG("IREG 16bit write %x\n", value);
 #endif
+			//senquack - Strip all but bits 0:10, rest are 0 or garbage in docs
+			value &= 0x7ff;
 			if (Config.Sio) psxHu16ref(0x1070) |= SWAPu16(0x80);
 			if (Config.SpuIrq) psxHu16ref(0x1070) |= SWAPu16(0x200);
 			psxHu16ref(0x1070) &= SWAPu16(value);
@@ -445,6 +447,8 @@ void psxHwWrite16(u32 add, u16 value) {
 #ifdef PSXHW_LOG
 			PSXHW_LOG("IMASK 16bit write %x\n", value);
 #endif
+			//senquack - Strip all but bits 0:10, rest are 0 or garbage in docs
+			value &= 0x7ff;
 			psxHu16ref(0x1074) = SWAPu16(value);
 			if (psxHu16ref(0x1070) & value)
 				new_dyna_set_event(PSXINT_NEWDRC_CHECK, 1);
@@ -551,6 +555,8 @@ void psxHwWrite32(u32 add, u32 value) {
 #ifdef PSXHW_LOG
 			PSXHW_LOG("IREG 32bit write %x\n", value);
 #endif
+			//senquack - Strip all but bits 0:10, rest are 0 or garbage in docs
+			value &= 0x7ff;
 			if (Config.Sio) psxHu32ref(0x1070) |= SWAPu32(0x80);
 			if (Config.SpuIrq) psxHu32ref(0x1070) |= SWAPu32(0x200);
 			psxHu32ref(0x1070) &= SWAPu32(value);
@@ -559,6 +565,8 @@ void psxHwWrite32(u32 add, u32 value) {
 #ifdef PSXHW_LOG
 			PSXHW_LOG("IMASK 32bit write %x\n", value);
 #endif
+			//senquack - Strip all but bits 0:10, rest are 0 or garbage in docs
+			value &= 0x7ff;
 			psxHu32ref(0x1074) = SWAPu32(value);
 			if (psxHu32ref(0x1070) & value)
 				new_dyna_set_event(PSXINT_NEWDRC_CHECK, 1);
