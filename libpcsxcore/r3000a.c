@@ -25,6 +25,7 @@
 #include "cdrom.h"
 #include "mdec.h"
 #include "gte.h"
+#include "psxevents.h"
 
 R3000Acpu *psxCpu = NULL;
 #ifdef DRC_DISABLE
@@ -61,6 +62,7 @@ void psxReset() {
 
 	psxCpu->Reset();
 
+	psxEvqueueInit();  // Event scheduler queue
 	psxHwReset();
 	psxBiosInit();
 
@@ -94,15 +96,6 @@ void psxException(u32 code, u32 bd) {
 	{
 		psxRegs.code = PSXMu32(psxRegs.pc);
 	}
-	
-	if (!Config.HLE && ((((psxRegs.code) >> 24) & 0xfe) == 0x4a)) {
-		// "hokuto no ken" / "Crash Bandicot 2" ...
-		// BIOS does not allow to return to GTE instructions
-		// (just skips it, supposedly because it's scheduled already)
-		// so we execute it here
-		extern void (*psxCP2[64])(void *cp2regs);
-		psxCP2[psxRegs.code & 0x3f](&psxRegs.CP2D);
-	}
 
 	// Set the Cause
 	psxRegs.CP0.n.Cause = (psxRegs.CP0.n.Cause & 0x300) | code;
@@ -126,96 +119,44 @@ void psxException(u32 code, u32 bd) {
 	psxRegs.CP0.n.Status = (psxRegs.CP0.n.Status &~0x3f) |
 						  ((psxRegs.CP0.n.Status & 0xf) << 2);
 
+	if (!Config.HLE && (((PSXMu32(psxRegs.CP0.n.EPC) >> 24) & 0xfe) == 0x4a)) {
+		// "hokuto no ken" / "Crash Bandicot 2" ... fix
+		PSXMu32ref(psxRegs.CP0.n.EPC)&= SWAPu32(~0x02000000);
+	}
+
 	if (Config.HLE) psxBiosException();
 }
 
 void psxBranchTest() {
-	if ((psxRegs.cycle - psxNextsCounter) >= psxNextCounter)
-		psxRcntUpdate();
-
-	if (psxRegs.interrupt) {
-		if ((psxRegs.interrupt & (1 << PSXINT_SIO)) && !Config.Sio) { // sio
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_SIO].sCycle) >= psxRegs.intCycle[PSXINT_SIO].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_SIO);
-				sioInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_CDR)) { // cdr
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_CDR].sCycle) >= psxRegs.intCycle[PSXINT_CDR].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_CDR);
-				cdrInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_CDREAD)) { // cdr read
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_CDREAD].sCycle) >= psxRegs.intCycle[PSXINT_CDREAD].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_CDREAD);
-				cdrReadInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_GPUDMA)) { // gpu dma
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_GPUDMA].sCycle) >= psxRegs.intCycle[PSXINT_GPUDMA].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_GPUDMA);
-				gpuInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_MDECOUTDMA)) { // mdec out dma
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_MDECOUTDMA].sCycle) >= psxRegs.intCycle[PSXINT_MDECOUTDMA].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_MDECOUTDMA);
-				mdec1Interrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_SPUDMA)) { // spu dma
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_SPUDMA].sCycle) >= psxRegs.intCycle[PSXINT_SPUDMA].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_SPUDMA);
-				spuInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_MDECINDMA)) { // mdec in
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_MDECINDMA].sCycle) >= psxRegs.intCycle[PSXINT_MDECINDMA].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_MDECINDMA);
-				mdec0Interrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_GPUOTCDMA)) { // gpu otc
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_GPUOTCDMA].sCycle) >= psxRegs.intCycle[PSXINT_GPUOTCDMA].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_GPUOTCDMA);
-				gpuotcInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_CDRDMA)) { // cdrom
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_CDRDMA].sCycle) >= psxRegs.intCycle[PSXINT_CDRDMA].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_CDRDMA);
-				cdrDmaInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_CDRPLAY)) { // cdr play timing
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_CDRPLAY].sCycle) >= psxRegs.intCycle[PSXINT_CDRPLAY].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_CDRPLAY);
-				cdrPlayInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_CDRLID)) { // cdr lid states
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_CDRLID].sCycle) >= psxRegs.intCycle[PSXINT_CDRLID].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_CDRLID);
-				cdrLidSeekInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_SPU_UPDATE)) { // scheduled spu update
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_SPU_UPDATE].sCycle) >= psxRegs.intCycle[PSXINT_SPU_UPDATE].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_SPU_UPDATE);
-				spuUpdate();
-			}
-		}
+	//senquack - Do not rearrange the math here! Events' sCycle val can end up
+	// negative (very large unsigned int) when a PSXINT_RESET_CYCLE_VAL event
+	// resets psxRegs.cycle to 0 and subtracts the previous psxRegs.cycle value
+	// from each event's sCycle value. If you were instead to test like this:
+	// 'while ((psxRegs.cycle >= (psxRegs.intCycle[X].sCycle + psxRegs.intCycle[X].cycle)',
+	// it could fail for events that were past-due at the moment of adjustment.
+	while ((psxRegs.cycle - psxRegs.intCycle[PSXINT_NEXT_EVENT].sCycle) >=
+			psxRegs.intCycle[PSXINT_NEXT_EVENT].cycle) {
+		// After dispatching the most-imminent event, this will update
+		//  the intCycle[PSXINT_NEXT_EVENT] element.
+		psxEvqueueDispatchAndRemoveFront(&psxRegs);
 	}
 
+	psxRegs.io_cycle_counter = psxRegs.intCycle[PSXINT_NEXT_EVENT].sCycle +
+	                           psxRegs.intCycle[PSXINT_NEXT_EVENT].cycle;
+
+	// Are one or more HW IRQ bits set in both their status and mask registers?
 	if (psxHu32(0x1070) & psxHu32(0x1074)) {
+		// Are both HW IRQ mask bit and IRQ master-enable bit set in CP0 status reg?
 		if ((psxRegs.CP0.n.Status & 0x401) == 0x401) {
-#ifdef PSXCPU_LOG
-			PSXCPU_LOG("Interrupt: %x %x\n", psxHu32(0x1070), psxHu32(0x1074));
-#endif
-//			SysPrintf("Interrupt (%x): %x %x\n", psxRegs.cycle, psxHu32(0x1070), psxHu32(0x1074));
 			psxException(0x400, 0);
 		}
+
+		// If CP0 SR value didn't allow a HW IRQ exception here, it is likely
+		//  because a game is currently inside an exception handler.
+		//  It is therefore important that the RFE 'return-from-exception'
+		//  instruction resets psxRegs.io_cycle_counter to 0. This ensures that
+		//  psxBranchTest() is called again as soon as possible so that any
+		//  pending HW IRQs are handled.
 	}
 }
 

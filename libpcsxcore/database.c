@@ -30,7 +30,7 @@ void Apply_Hacks_Cdrom()
 			/* Disable the second memory card slot for the game */
 			Config.Mcd2[0] = 0;
 			/* This also needs to be done because in sio.c, they don't use Config.Mcd2 for that purpose */
-			McdDisable[1] = 1;
+			//McdDisable[1] = 1;
 		}
 	}
 }

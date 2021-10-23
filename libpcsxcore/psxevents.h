@@ -1,6 +1,4 @@
 /***************************************************************************
- *   Copyright (C) 2007 Ryan Schultz, PCSX-df Team, PCSX team              *
- *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
  *   the Free Software Foundation; either version 2 of the License, or     *
@@ -17,60 +15,28 @@
  *   51 Franklin Street, Fifth Floor, Boston, MA 02111-1307 USA.           *
  ***************************************************************************/
 
-#ifndef __MISC_H__
-#define __MISC_H__
+/*
+ * Event / interrupt scheduling
+ *
+ * Added July 2016 by senquack (Daniel Silsby)
+ *
+ */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#ifndef PSXEVENTS_H
+#define PSXEVENTS_H
 
-#include "psxcommon.h"
-#include "coff.h"
-#include "plugins.h"
+#include <stdio.h>
+#include <stdint.h>
 #include "r3000a.h"
-#include "psxmem.h"
+#include "psxeventnum.h"
 
-#undef s_addr
+void psxEvqueueInit(void);
+void psxEvqueueInitFromFreeze(void);
+void psxEvqueueAdd(enum psxEventNum ev, uint32_t cycles_after);
+void psxEvqueueRemove(enum psxEventNum ev);
+void psxEvqueueDispatchAndRemoveFront(psxRegisters *pr);
 
-typedef struct {
-	unsigned char id[8];
-    u32 text;                   
-    u32 data;                    
-    u32 pc0;
-    u32 gp0;                     
-    u32 t_addr;
-    u32 t_size;
-    u32 d_addr;                  
-    u32 d_size;                  
-    u32 b_addr;                  
-    u32 b_size;                  
-    u32 s_addr;
-    u32 s_size;
-    u32 SavedSP;
-    u32 SavedFP;
-    u32 SavedGP;
-    u32 SavedRA;
-    u32 SavedS0;
-} EXE_HEADER;
+// Should be called when Config.PsxType changes
+void SPU_resetUpdateInterval(void);
 
-extern char CdromId[10];
-extern char CdromLabel[33];
-
-int LoadCdrom();
-int LoadCdromFile(const char *filename, EXE_HEADER *head);
-int CheckCdrom();
-int Load(const char *ExePath);
-
-int SaveState(const char *file);
-int LoadState(const char *file);
-int CheckState(const char *file);
-
-int SendPcsxInfo();
-int RecvPcsxInfo();
-
-u16 calcCrc(u8 *d, int len);
-
-#ifdef __cplusplus
-}
-#endif
-#endif
+#endif //PSXEVENTS_H

@@ -35,10 +35,6 @@
 #include "gpu.h"
 #include <zlib.h>
 
-#if (defined(__GNUC__) && __GNUC__ >= 5) || defined(__clang__)
-#pragma GCC diagnostic ignored "-Wpointer-sign"
-#endif
-
 #undef SysPrintf
 #define SysPrintf if (Config.PsxOut) printf
 
@@ -1405,46 +1401,43 @@ void psxBios_FlushCache() { // 44
 #ifdef PSXBIOS_LOG
 	PSXBIOS_LOG("psxBios_%s\n", biosA0n[0x44]);
 #endif
-#ifdef ICACHE_EMULATION
-	psxCpu->Notify(R3000ACPU_NOTIFY_CACHE_ISOLATED, NULL);
-	psxCpu->Notify(R3000ACPU_NOTIFY_CACHE_UNISOLATED, NULL);
-#endif
+
 	pc0 = ra;
 }
 
 void psxBios_GPU_dw() { // 0x46
 	int size;
-	u32 *ptr;
+	s32 *ptr;
 
 #ifdef PSXBIOS_LOG
 	PSXBIOS_LOG("psxBios_%s\n", biosA0n[0x46]);
 #endif
 
 	GPU_writeData(0xa0000000);
-	GPU_writeData((a1<<0x10)|(a0&0xffff));
-	GPU_writeData((a3<<0x10)|(a2&0xffff));
-	size = (a2*a3)/2;
-	ptr = (u32*)PSXM(Rsp[4]);  //that is correct?
-	while(size--)
-	{
-		GPU_writeData(SWAPu32(*ptr++));
-	} 
+	GPU_writeData((a1<<16)|(a0&0xffff));
+	GPU_writeData((a3<<16)|(a2&0xffff));
+	size = (a2*a3+1)/2;
+	ptr = (s32*)PSXM(Rsp[4]);  //that is correct?
+	do {
+		GPU_writeData(SWAP32(*ptr));
+		ptr++;
+	} while(--size);
 
 	pc0 = ra;
 }  
 
 void psxBios_mem2vram() { // 0x47
 	int size;
-	gpuSyncPluginSR();
+
 	GPU_writeData(0xa0000000);
-	GPU_writeData((a1<<0x10)|(a0&0xffff));
-	GPU_writeData((a3<<0x10)|(a2&0xffff));
-	size = ((((a2 * a3) / 2) >> 4) << 16);
+	GPU_writeData((a1<<16)|(a0&0xffff));
+	GPU_writeData((a3<<16)|(a2&0xffff));
+	size = (a2*a3+1)/2;
 	GPU_writeStatus(0x04000002);
 	psxHwWrite32(0x1f8010f4,0);
 	psxHwWrite32(0x1f8010f0,psxHwRead32(0x1f8010f0)|0x800);
 	psxHwWrite32(0x1f8010a0,Rsp[4]);//might have a buggy...
-	psxHwWrite32(0x1f8010a4, size | 0x10);
+	psxHwWrite32(0x1f8010a4,((size/16)<<16)|16);
 	psxHwWrite32(0x1f8010a8,0x01000201);
 
 	pc0 = ra;
@@ -1457,26 +1450,22 @@ void psxBios_SendGPU() { // 0x48
 }
 
 void psxBios_GPU_cw() { // 0x49
-	gpuSyncPluginSR();
 	GPU_writeData(a0);
 	pc0 = ra;
-	v0 = HW_GPU_STATUS;
 }
 
 void psxBios_GPU_cwb() { // 0x4a
-	u32 *ptr = (u32*)Ra0;
+	s32 *ptr = (s32*)Ra0;
 	int size = a1;
-	gpuSyncPluginSR();
-	while(size--)
-	{
-		GPU_writeData(SWAPu32(*ptr++));
+	while(size--) {
+		GPU_writeData(SWAP32(*ptr));
+		ptr++;
 	}
 
 	pc0 = ra;
 }
    
 void psxBios_GPU_SendPackets() { //4b:	
-	gpuSyncPluginSR();
 	GPU_writeStatus(0x04000002);
 	psxHwWrite32(0x1f8010f4,0);
 	psxHwWrite32(0x1f8010f0,psxHwRead32(0x1f8010f0)|0x800);
@@ -2101,6 +2090,8 @@ static void buopen(int mcd, u8 *ptr, u8 *cfg)
  */
 
 void psxBios_open() { // 0x32
+	int i;
+	char *ptr;
 	void *pa0 = Ra0;
 
 #ifdef PSXBIOS_LOG

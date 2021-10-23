@@ -70,6 +70,7 @@ extern "C" {
 			icr |= HW_DMA_ICR_IRQ_SENT; \
 		} \
 		HW_DMA_ICR = SWAP32(icr); \
+		ResetIoCycle(); \
 	} \
 }
 

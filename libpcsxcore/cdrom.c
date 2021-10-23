@@ -25,6 +25,7 @@
 #include "ppf.h"
 #include "psxdma.h"
 #include "arm_features.h"
+#include "psxevents.h"
 
 /* logging */
 #if 0
@@ -172,40 +173,29 @@ static void sec2msf(unsigned int s, u8 *msf) {
 
 // cdrInterrupt
 #define CDR_INT(eCycle) { \
-	psxRegs.interrupt |= (1 << PSXINT_CDR); \
-	psxRegs.intCycle[PSXINT_CDR].cycle = eCycle; \
-	psxRegs.intCycle[PSXINT_CDR].sCycle = psxRegs.cycle; \
-	new_dyna_set_event(PSXINT_CDR, eCycle); \
+	psxEvqueueAdd(PSXINT_CDR, eCycle); \
 }
 
 // cdrReadInterrupt
 #define CDREAD_INT(eCycle) { \
-	psxRegs.interrupt |= (1 << PSXINT_CDREAD); \
-	psxRegs.intCycle[PSXINT_CDREAD].cycle = eCycle; \
-	psxRegs.intCycle[PSXINT_CDREAD].sCycle = psxRegs.cycle; \
-	new_dyna_set_event(PSXINT_CDREAD, eCycle); \
+	psxEvqueueAdd(PSXINT_CDREAD, eCycle); \
 }
 
+// Next two interrupt macros are new from PCSX Reloaded/Rearmed.
 // cdrLidSeekInterrupt
 #define CDRLID_INT(eCycle) { \
-	psxRegs.interrupt |= (1 << PSXINT_CDRLID); \
-	psxRegs.intCycle[PSXINT_CDRLID].cycle = eCycle; \
-	psxRegs.intCycle[PSXINT_CDRLID].sCycle = psxRegs.cycle; \
-	new_dyna_set_event(PSXINT_CDRLID, eCycle); \
+	psxEvqueueAdd(PSXINT_CDRLID, eCycle); \
 }
 
 // cdrPlayInterrupt
 #define CDRMISC_INT(eCycle) { \
-	psxRegs.interrupt |= (1 << PSXINT_CDRPLAY); \
-	psxRegs.intCycle[PSXINT_CDRPLAY].cycle = eCycle; \
-	psxRegs.intCycle[PSXINT_CDRPLAY].sCycle = psxRegs.cycle; \
-	new_dyna_set_event(PSXINT_CDRPLAY, eCycle); \
+	psxEvqueueAdd(PSXINT_CDRPLAY, eCycle); \
 }
 
 #define StopReading() { \
 	if (cdr.Reading) { \
 		cdr.Reading = 0; \
-		psxRegs.interrupt &= ~(1 << PSXINT_CDREAD); \
+		psxEvqueueRemove(PSXINT_CDREAD); \
 	} \
 	cdr.StatP &= ~(STATUS_READ|STATUS_SEEK);\
 }
@@ -231,6 +221,10 @@ static void setIrq(void)
 {
 	if (cdr.Stat & cdr.Reg2)
 		psxHu32ref(0x1070) |= SWAP32((u32)0x4);
+
+	// When IRQ status bit gets set, ensure psxBranchTest() gets called as soon
+	//  as possible, so HW IRQ exception gets handled
+	ResetIoCycle();
 }
 
 // timing used in this function was taken from tests on real hardware

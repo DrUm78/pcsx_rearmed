@@ -62,6 +62,7 @@ void ClearAllCheats() {
 
 // load cheats from the specific filename
 void LoadCheats(const char *filename) {
+	extern void trim(char *str);
 	FILE				*fp;
 	char				buf[256];
 	int					count = 0;

@@ -134,6 +134,11 @@ void new_dyna_after_save(void)
 	psxRegs.interrupt |= 1 << PSXINT_RCNT;
 }
 
+
+//senquack - Originally separate variables, now handled together with
+// all other scheduled emu events as new event type PSXINT_RCNT
+#define psxNextCounter psxRegs.intCycle[PSXINT_RCNT].cycle
+#define psxNextsCounter psxRegs.intCycle[PSXINT_RCNT].sCycle
 static void new_dyna_restore(void)
 {
 	int i;

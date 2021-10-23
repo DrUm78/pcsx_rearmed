@@ -27,6 +27,7 @@
 #include "gpu.h"
 #include "ppf.h"
 #include "database.h"
+#include "psxevents.h"
 #include <zlib.h>
 
 char CdromId[10] = "";
@@ -667,6 +668,14 @@ int LoadState(const char *file) {
 	SaveFuncs.read(f, psxR, 0x00080000);
 	SaveFuncs.read(f, psxH, 0x00010000);
 	SaveFuncs.read(f, (void *)&psxRegs, sizeof(psxRegs));
+	
+	psxRegs.io_cycle_counter=0;
+	
+	//senquack - Clear & intialize new event scheduler queue based on
+	// saved contents of psxRegs.interrupt and psxRegs.intCycle[]
+	// NOTE: important to do this before calling any functions like
+	// psxRcntFreeze() that will queue events of their own.
+	psxEvqueueInitFromFreeze();
 
 	if (Config.HLE)
 		psxBiosFreeze(0);

@@ -22,6 +22,7 @@
 */
 
 #include "sio.h"
+#include "psxevents.h"
 #include <sys/stat.h>
 
 // Status Flags
@@ -69,10 +70,7 @@ char McdDisable[2];
 
 #define SIO_INT(eCycle) { \
 	if (!Config.Sio) { \
-		psxRegs.interrupt |= (1 << PSXINT_SIO); \
-		psxRegs.intCycle[PSXINT_SIO].cycle = eCycle; \
-		psxRegs.intCycle[PSXINT_SIO].sCycle = psxRegs.cycle; \
-		new_dyna_set_event(PSXINT_SIO, eCycle); \
+		psxEvqueueAdd(PSXINT_SIO, eCycle); \
 	} \
 }
 
@@ -310,7 +308,7 @@ void sioWriteCtrl16(unsigned short value) {
 	if ((CtrlReg & SIO_RESET) || !(CtrlReg & DTR)) {
 		padst = 0; mcdst = 0; parp = 0;
 		StatReg = TX_RDY | TX_EMPTY;
-		psxRegs.interrupt &= ~(1 << PSXINT_SIO);
+		psxEvqueueRemove(PSXINT_SIO);
 	}
 }
 

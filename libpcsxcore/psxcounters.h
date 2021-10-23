@@ -53,6 +53,7 @@ u32 psxRcntRmode(u32 index);
 u32 psxRcntRtarget(u32 index);
 
 s32 psxRcntFreeze(void *f, s32 Mode);
+void psxRcntAdjustTimestamps(const u32 prev_cycle_val);
 
 #ifdef __cplusplus
 }

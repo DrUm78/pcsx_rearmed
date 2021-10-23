@@ -161,7 +161,7 @@ static void io_write_imask16(u32 value)
 {
 	psxHu16ref(0x1074) = value;
 	if (psxHu16ref(0x1070) & value)
-		new_dyna_set_event(PSXINT_NEWDRC_CHECK, 1);
+		psxEvqueueAdd(PSXINT_NEWDRC_CHECK, 1);
 }
 
 static void io_write_ireg32(u32 value)
@@ -175,7 +175,7 @@ static void io_write_imask32(u32 value)
 {
 	psxHu32ref(0x1074) = value;
 	if (psxHu32ref(0x1070) & value)
-		new_dyna_set_event(PSXINT_NEWDRC_CHECK, 1);
+		psxEvqueueAdd(PSXINT_NEWDRC_CHECK, 1);
 }
 
 static void io_write_dma_icr32(u32 value)
