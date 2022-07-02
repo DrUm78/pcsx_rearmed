@@ -48,6 +48,9 @@
 
 #define REARMED_BIRTHDAY_TIME 1293306830	/* 25 Dec 2010 */
 
+// Nick
+static int swap_cd_multidisk(void);
+
 #define array_size(x) (sizeof(x) / sizeof(x[0]))
 
 typedef enum
@@ -357,6 +360,9 @@ void draw_progress_bar(SDL_Surface * surface, uint16_t x, uint16_t y, uint16_t w
 
 
 void add_menu_zone(ENUM_MENU_TYPE menu_type){
+	// Nick
+	char szText[100];
+	
     /// ------ Increase nb of menu zones -------
     nb_menu_zones++;
 
@@ -445,10 +451,10 @@ void add_menu_zone(ENUM_MENU_TYPE menu_type){
     case MENU_TYPE_POWERDOWN:
         MENU_DEBUG_PRINTF("Init MENU_TYPE_POWERDOWN\n");
         /// ------ Text ------
-        text_surface = TTF_RenderText_Blended(menu_title_font, "POWERDOWN", text_color);
+        /*text_surface = TTF_RenderText_Blended(menu_title_font, "POWERDOWN", text_color);
         text_pos.x = (surface->w - MENU_ZONE_WIDTH)/2 + (MENU_ZONE_WIDTH - text_surface->w)/2;
         text_pos.y = surface->h - MENU_ZONE_HEIGHT/2 - text_surface->h/2;
-        SDL_BlitSurface(text_surface, NULL, surface, &text_pos);
+        SDL_BlitSurface(text_surface, NULL, surface, &text_pos);*/
         break;
     default:
         MENU_DEBUG_PRINTF("Warning - In add_menu_zone, unknown MENU_TYPE: %d\n", menu_type);
@@ -473,7 +479,7 @@ void init_menu_zones(){
     /// Init Exit Menu
     add_menu_zone(MENU_TYPE_EXIT);
     /// Init Powerdown Menu
-    //add_menu_zone(MENU_TYPE_POWERDOWN);
+    add_menu_zone(MENU_TYPE_POWERDOWN);
 }
 
 
@@ -695,12 +701,26 @@ void menu_screen_refresh(int menuItem, int prevItem, int scroll, uint8_t menu_co
         case MENU_TYPE_EXIT:
         case MENU_TYPE_POWERDOWN:
             if(menu_confirmation){
-                sprintf(text_tmp, "Are you sure ?");
+				// Nick
+                sprintf(text_tmp, idx_menus[menuItem] == MENU_TYPE_POWERDOWN ? "Change CD?" : "Are you sure ?");
                 text_surface = TTF_RenderText_Blended(menu_info_font, text_tmp, text_color);
                 text_pos.x = (draw_screen->w - MENU_ZONE_WIDTH)/2 + (MENU_ZONE_WIDTH - text_surface->w)/2;
                 text_pos.y = draw_screen->h - MENU_ZONE_HEIGHT/2 - text_surface->h/2 + 2*padding_y_from_center_menu_zone;
                 SDL_BlitSurface(text_surface, NULL, draw_screen, &text_pos);
             }
+			else
+			{ 
+				// Nick
+				if (idx_menus[menuItem] == MENU_TYPE_POWERDOWN)
+				{
+					sprintf(text_tmp, "CD: %d/%d", cdrIsoMultidiskSelect+1, cdrIsoMultidiskCount);
+
+					text_surface = TTF_RenderText_Blended(menu_title_font, text_tmp, text_color);
+					text_pos.x = (draw_screen->w - MENU_ZONE_WIDTH) / 2 + (MENU_ZONE_WIDTH - text_surface->w) / 2;
+					text_pos.y = draw_screen->h - MENU_ZONE_HEIGHT / 2 - text_surface->h / 2;
+					SDL_BlitSurface(text_surface, NULL, draw_screen, &text_pos);
+				}
+			}
             break;
         default:
             break;
@@ -1085,11 +1105,15 @@ void run_menu_loop()
                         }
                         else if(idx_menus[menuItem] == MENU_TYPE_POWERDOWN){
                             if(menu_confirmation){
-                                MENU_DEBUG_PRINTF("Powerdown - confirmed\n");
+								// Nick
+								if (cdrIsoMultidiskCount > 1)
+									swap_cd_multidisk();
+								stop_menu_loop = 1;
+                                /*MENU_DEBUG_PRINTF("Powerdown - confirmed\n");
                                 /// ----- Shell cmd ----
                                 execlp(SHELL_CMD_POWERDOWN, SHELL_CMD_POWERDOWN, NULL);
                                 MENU_ERROR_PRINTF("Failed to run command %s\n", SHELL_CMD_POWERDOWN);
-                                exit(0);
+                                exit(0);*/
                             }
                             else{
                                 MENU_DEBUG_PRINTF("Powerdown - asking confirmation\n");
@@ -3444,6 +3468,7 @@ static int swap_cd_image(void)
 
 static int swap_cd_multidisk(void)
 {
+	// Nick
 	cdrIsoMultidiskSelect++;
 	CdromId[0] = '\0';
 	CdromLabel[0] = '\0';
