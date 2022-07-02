@@ -593,7 +593,7 @@ static void update_analogs(void)
 	//printf("%4d %4d %4d %4d\n", in_a1[0], in_a1[1], in_a2[0], in_a2[1]);
 }
 
-static void update_input(void)
+void update_input(void)
 {
 	int actions[IN_BINDTYPE_COUNT] = { 0, };
 	unsigned int emu_act;

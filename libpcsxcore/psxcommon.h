@@ -77,6 +77,10 @@ typedef uint8_t boolean;
 #define FALSE 0
 #endif
 
+#ifndef INLINE
+#define INLINE static inline
+#endif
+
 // Local includes
 #include "system.h"
 

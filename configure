@@ -42,7 +42,7 @@ platform="generic"
 builtin_gpu_list="peops unai neon senquack"
 builtin_gpu=""
 sound_driver_list="oss alsa pulseaudio sdl libretro"
-sound_drivers=""
+sound_drivers="sdl"
 plugins="plugins/spunull/spunull.so \
 plugins/dfxvideo/gpu_peops.so plugins/gpu_unai/gpu_unai.so plugins/gpu_senquack/gpu_senquack.so"
 drc_cache_base="no"
@@ -69,7 +69,7 @@ CC="${CC-${CROSS_COMPILE}gcc}"
 CXX="${CXX-${CROSS_COMPILE}g++}"
 AS="${AS-${CROSS_COMPILE}as}"
 AR="${AS-${CROSS_COMPILE}ar}"
-MAIN_LDLIBS="$LDLIBS -ldl -lm -lpthread"
+MAIN_LDLIBS="$LDLIBS  -lSDL_ttf -lSDL_image -ldl -lm -lpthread"
 config_mak="config.mak"
 
 fail()

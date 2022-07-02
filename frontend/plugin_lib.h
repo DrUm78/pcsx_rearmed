@@ -109,6 +109,8 @@ extern void (*pl_plat_blit)(int doffs, const void *src,
 			    int w, int h, int sstride, int bgr24);
 extern void (*pl_plat_hud_print)(int x, int y, const char *str, int bpp);
 
+extern void update_input();
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof(x[0]))
 #endif

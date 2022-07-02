@@ -21,16 +21,16 @@
 
 #include "config.h"
 
-#define DEFAULT_MEM_CARD_1 "/.pcsx/memcards/card1.mcd"
-#define DEFAULT_MEM_CARD_2 "/.pcsx/memcards/card2.mcd"
-#define MEMCARD_DIR "/.pcsx/memcards/"
-#define PLUGINS_DIR "/.pcsx/plugins/"
-#define PLUGINS_CFG_DIR "/.pcsx/plugins/cfg/"
-#define PCSX_DOT_DIR "/.pcsx/"
-#define STATES_DIR "/.pcsx/sstates/"
-#define CHEATS_DIR "/.pcsx/cheats/"
-#define PATCHES_DIR "/.pcsx/patches/"
-#define BIOS_DIR "/bios/"
+#define DEFAULT_MEM_CARD_1 "/mnt/PS1/memcards/card1.mcd"
+#define DEFAULT_MEM_CARD_2 "/mnt/PS1/memcards/card2.mcd"
+#define MEMCARD_DIR "/mnt/PS1/memcards/"
+#define PLUGINS_DIR "~/.pcsx/plugins/"
+#define PLUGINS_CFG_DIR "~/.pcsx/plugins/cfg/"
+#define PCSX_DOT_DIR "~/.pcsx/"
+#define STATES_DIR "~/.pcsx/sstates/"
+#define CHEATS_DIR "~/.pcsx/cheats/"
+#define PATCHES_DIR "~/.pcsx/patches/"
+#define BIOS_DIR "/mnt/PS1/bios/"
 
 extern char cfgfile_basename[MAXPATHLEN];
 
@@ -55,6 +55,7 @@ void set_cd_image(const char *fname);
 
 extern unsigned long gpuDisp;
 extern int ready_to_go, g_emu_want_quit, g_emu_resetting;
+extern int need_screen_cleared;
 
 extern char hud_msg[64];
 extern int hud_new_msg;
@@ -63,29 +64,35 @@ enum sched_action {
 	SACTION_NONE,
 	SACTION_ENTER_MENU,
 	SACTION_LOAD_STATE,
+	SACTION_PRE_SAVE_STATE,
 	SACTION_SAVE_STATE,
 	SACTION_NEXT_SSLOT,
 	SACTION_PREV_SSLOT,
 	SACTION_TOGGLE_FSKIP,
 	SACTION_SWITCH_DISPMODE,
+	SACTION_ASPECT_RATIO_FACTOR_DECREASE,
+	SACTION_ASPECT_RATIO_FACTOR_INCREASE,
 	SACTION_FAST_FORWARD,
 	SACTION_SCREENSHOT,
-	SACTION_VOLUME_UP,	// 10
+	SACTION_VOLUME_UP,
 	SACTION_VOLUME_DOWN,
 	SACTION_MINIMIZE,
+	SACTION_GUN_TRIGGER = 16,
 	SACTION_TOGGLE_FPS,
 	SACTION_TOGGLE_FULLSCREEN,
-	SACTION_GUN_TRIGGER = 16,
 	SACTION_GUN_A,
 	SACTION_GUN_B,
 	SACTION_GUN_TRIGGER2,
+	SACTION_BRIGHTNESS_DOWN,
+	SACTION_BRIGHTNESS_UP,
+	SACTION_QUICK_SAVE_AND_POWEROFF,
 };
 
 #define SACTION_GUN_MASK (0x0f << SACTION_GUN_TRIGGER)
 
+extern enum sched_action emu_action, emu_action_old, emu_action_future;
 static inline void emu_set_action(enum sched_action action_)
 {
-	extern enum sched_action emu_action, emu_action_old;
 	extern int stop;
 
 	if (action_ == SACTION_NONE)

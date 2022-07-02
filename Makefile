@@ -1,7 +1,7 @@
 # Makefile for PCSX ReARMed
 
 # default stuff goes here, so that config can override
-TARGET ?= pcsx
+TARGET ?= opk/pcsx
 CFLAGS += -Wall -ggdb -Iinclude -ffast-math
 ifndef DEBUG
 CFLAGS += -O2 -DNDEBUG
@@ -255,7 +255,7 @@ CFLAGS += -DNO_FRONTEND
 endif
 
 # misc
-OBJS += frontend/main.o frontend/plugin.o
+OBJS += frontend/main.o frontend/plugin.o frontend/configfile_fk.o 
 
 
 frontend/menu.o frontend/main.o: frontend/revision.h
