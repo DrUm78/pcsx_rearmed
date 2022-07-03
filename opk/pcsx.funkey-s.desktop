@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=PCSXR
+Comment=PlayStation emulator
+Icon=pcsx
+Exec=pcsx.sh %f
+Categories=emulators
+SelectorFilter=cue,pbp,chd

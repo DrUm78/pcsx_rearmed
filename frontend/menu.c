@@ -2964,7 +2964,7 @@ static void draw_frame_debug(GPUFreeze_t *gpuf, int x, int y)
 	for (; h > 0; h--, d += g_menuscreen_w, s += 1024)
 		bgr555_to_rgb565(d, s, w * 2);
 
-	smalltext_out16(4, 1, "build: "__DATE__ " " __TIME__ " " REV, 0xe7fc);
+	//smalltext_out16(4, 1, "build: "__DATE__ " " __TIME__ " " REV, 0xe7fc);
 	snprintf(buff, sizeof(buff), "GPU sr: %08x", gpuf->ulStatus);
 	smalltext_out16(4, (ty += me_sfont_h), buff, 0xe7fc);
 	snprintf(buff, sizeof(buff), "PC/SP: %08x %08x", psxRegs.pc, psxRegs.GPR.n.sp);
@@ -3248,7 +3248,7 @@ static void draw_frame_main(void)
 
 static void draw_frame_credits(void)
 {
-	smalltext_out16(4, 1, "build: " __DATE__ " " __TIME__ " " REV, 0xe7fc);
+	//smalltext_out16(4, 1, "build: " __DATE__ " " __TIME__ " " REV, 0xe7fc);
 }
 
 static const char credits_text[] =

@@ -11,3 +11,5 @@ frontend/revision.h
 tools
 .pcsx/
 obj/
+pcsx
+*.opk

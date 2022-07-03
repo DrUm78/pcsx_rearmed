@@ -1,0 +1,14 @@
+#!/bin/sh
+
+git fetch --all
+git merge upstream/newfun_branch
+git merge upstream2/master
+git submodule update --remote --recursive
+./configure --enable-neon --gpu=neon --sound-drivers=sdl
+make clean
+make -j16
+/opt/FunKey-sdk/bin/arm-funkey-linux-musleabihf-strip pcsx
+cp pcsx opk/
+mksquashfs ./opk pcsx_rearmed_ultimate.opk -all-root -noappend -no-exports -no-xattrs
+md5sum pcsx
+make clean

@@ -1,7 +1,7 @@
 # Makefile for PCSX ReARMed
 
 # default stuff goes here, so that config can override
-TARGET ?= opk/pcsx
+TARGET ?= pcsx
 CFLAGS += -Wall -ggdb -Iinclude -ffast-math
 ifndef DEBUG
 CFLAGS += -O2 -DNDEBUG
