@@ -1,7 +1,7 @@
 [submodule "libpicofe"]
 	path = frontend/libpicofe
-	url = https://github.com/gameblabla/libpicofe.git
-	branch = funkey_chn
+	url = https://github.com/FunKey-Project/libpicofe.git
+	branch = FunKey-pcsx_rearmed
 [submodule "warm"]
 	path = frontend/warm
 	url = https://github.com/notaz/warm.git
