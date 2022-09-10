@@ -1078,7 +1078,7 @@ void SysRunGui() {
         printf("SysRunGui\n");
 }
 
-static void dummy_lace()
+static void CALLBACK dummy_lace()
 {
 }
 

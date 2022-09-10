@@ -21,6 +21,9 @@
 // generic defines
 /////////////////////////////////////////////////////////
 
+//#define log_unhandled printf
+#define log_unhandled(...)
+
 #ifdef __GNUC__
 #define noinline __attribute__((noinline))
 #define unlikely(x) __builtin_expect((x), 0)
@@ -194,7 +197,7 @@ typedef struct
  unsigned int    dwNoiseVal;           // global noise generator
  unsigned int    dwNoiseCount;
  unsigned int    dwNewChannel;         // flags for faster testing, if new channel starts
- unsigned int    dwChannelOn;          // not silent channels
+ unsigned int    dwChannelsAudible;    // not silent channels
  unsigned int    dwChannelDead;        // silent+not useful channels
 
  unsigned char * pSpuBuffer;
@@ -232,7 +235,9 @@ typedef struct
  unsigned short  regArea[0x400];
 } SPUInfo;
 
-#define regAreaGet(ch,offset) \
+#define regAreaGet(offset) \
+  spu.regArea[((offset) - 0xc00)>>1]
+#define regAreaGetCh(ch, offset) \
   spu.regArea[((ch<<4)|(offset))>>1]
 
 ///////////////////////////////////////////////////////////

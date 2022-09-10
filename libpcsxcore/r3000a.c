@@ -83,15 +83,14 @@ void psxShutdown() {
 }
 
 void psxException(u32 code, u32 bd) {
-	psxRegs.code = fetch(psxRegs.pc);
+	psxRegs.code = PSXMu32(psxRegs.pc);
 	
 	if (!Config.HLE && ((((psxRegs.code) >> 24) & 0xfe) == 0x4a)) {
 		// "hokuto no ken" / "Crash Bandicot 2" ...
 		// BIOS does not allow to return to GTE instructions
 		// (just skips it, supposedly because it's scheduled already)
 		// so we execute it here
-		extern void (*psxCP2[64])(void *cp2regs);
-		psxCP2[psxRegs.code & 0x3f](&psxRegs.CP2D);
+		psxCP2[psxRegs.code & 0x3f](&psxRegs.CP2);
 	}
 
 	// Set the Cause
@@ -139,7 +138,7 @@ void psxBranchTest() {
 		if (psxRegs.interrupt & (1 << PSXINT_CDREAD)) { // cdr read
 			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_CDREAD].sCycle) >= psxRegs.intCycle[PSXINT_CDREAD].cycle) {
 				psxRegs.interrupt &= ~(1 << PSXINT_CDREAD);
-				cdrReadInterrupt();
+				cdrPlaySeekReadInterrupt();
 			}
 		}
 		if (psxRegs.interrupt & (1 << PSXINT_GPUDMA)) { // gpu dma
@@ -176,12 +175,6 @@ void psxBranchTest() {
 			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_CDRDMA].sCycle) >= psxRegs.intCycle[PSXINT_CDRDMA].cycle) {
 				psxRegs.interrupt &= ~(1 << PSXINT_CDRDMA);
 				cdrDmaInterrupt();
-			}
-		}
-		if (psxRegs.interrupt & (1 << PSXINT_CDRPLAY)) { // cdr play timing
-			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_CDRPLAY].sCycle) >= psxRegs.intCycle[PSXINT_CDRPLAY].cycle) {
-				psxRegs.interrupt &= ~(1 << PSXINT_CDRPLAY);
-				cdrPlayInterrupt();
 			}
 		}
 		if (psxRegs.interrupt & (1 << PSXINT_CDRLID)) { // cdr lid states

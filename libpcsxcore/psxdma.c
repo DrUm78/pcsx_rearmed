@@ -54,7 +54,7 @@ void psxDma4(u32 madr, u32 bcr, u32 chcr) { // SPU
 			words = (bcr >> 16) * (bcr & 0xffff);
 			SPU_writeDMAMem(ptr, words * 2, psxRegs.cycle);
 			HW_DMA4_MADR = SWAPu32(madr + words * 4);
-			SPUDMA_INT(words / 2);
+			SPUDMA_INT(words * 4);
 			return;
 
 		case 0x01000200: //spu to cpu transfer
@@ -73,14 +73,12 @@ void psxDma4(u32 madr, u32 bcr, u32 chcr) { // SPU
 			psxCpu->Clear(madr, words);
 
 			HW_DMA4_MADR = SWAPu32(madr + words * 4);
-			SPUDMA_INT(words / 2);
+			SPUDMA_INT(words * 4);
 			return;
 
-#ifdef PSXDMA_LOG
 		default:
-			PSXDMA_LOG("*** DMA4 SPU - unknown *** %x addr = %x size = %x\n", chcr, madr, bcr);
+			log_unhandled("*** DMA4 SPU - unknown *** %x addr = %x size = %x\n", chcr, madr, bcr);
 			break;
-#endif
 	}
 
 	HW_DMA4_CHCR &= SWAP32(~0x01000000);
@@ -200,11 +198,9 @@ void psxDma2(u32 madr, u32 bcr, u32 chcr) { // GPU
 			GPUDMA_INT(size);
 			return;
 
-#ifdef PSXDMA_LOG
 		default:
-			PSXDMA_LOG("*** DMA 2 - GPU unknown *** %lx addr = %lx size = %lx\n", chcr, madr, bcr);
+			log_unhandled("*** DMA 2 - GPU unknown *** %x addr = %x size = %x\n", chcr, madr, bcr);
 			break;
-#endif
 	}
 
 	HW_DMA2_CHCR &= SWAP32(~0x01000000);
@@ -253,12 +249,10 @@ void psxDma6(u32 madr, u32 bcr, u32 chcr) {
 		GPUOTCDMA_INT(16);
 		return;
 	}
-#ifdef PSXDMA_LOG
 	else {
 		// Unknown option
-		PSXDMA_LOG("*** DMA6 OT - unknown *** %x addr = %x size = %x\n", chcr, madr, bcr);
+		log_unhandled("*** DMA6 OT - unknown *** %x addr = %x size = %x\n", chcr, madr, bcr);
 	}
-#endif
 
 	HW_DMA6_CHCR &= SWAP32(~0x01000000);
 	DMA_INTERRUPT(6);

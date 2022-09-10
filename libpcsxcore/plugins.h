@@ -25,20 +25,9 @@ extern "C" {
 #endif
 
 #include "psxcommon.h"
+#include "psemu_plugin_defs.h"
 
 //#define ENABLE_SIO1API 1
-
-#ifndef _WIN32
-
-typedef void* HWND;
-#define CALLBACK
-
-#else
-
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-
-#endif
 
 typedef long (CALLBACK *GPUopen)(unsigned long *, char *, char *);
 typedef long (CALLBACK *SPUopen)(void);
@@ -47,8 +36,6 @@ typedef long (CALLBACK *NETopen)(unsigned long *);
 typedef long (CALLBACK *SIO1open)(unsigned long *);
 
 #include "spu.h"
-
-#include "psemu_plugin_defs.h"
 #include "decode_xa.h"
 
 int LoadPlugins();
@@ -185,7 +172,7 @@ typedef void (CALLBACK* SPUwriteDMA)(unsigned short);
 typedef unsigned short (CALLBACK* SPUreadDMA)(void);
 typedef void (CALLBACK* SPUwriteDMAMem)(unsigned short *, int, unsigned int);
 typedef void (CALLBACK* SPUreadDMAMem)(unsigned short *, int, unsigned int);
-typedef void (CALLBACK* SPUplayADPCMchannel)(xa_decode_t *);
+typedef void (CALLBACK* SPUplayADPCMchannel)(xa_decode_t *, unsigned int, int);
 typedef void (CALLBACK* SPUregisterCallback)(void (CALLBACK *callback)(void));
 typedef void (CALLBACK* SPUregisterScheduleCb)(void (CALLBACK *callback)(unsigned int cycles_after));
 typedef long (CALLBACK* SPUconfigure)(void);
@@ -202,7 +189,7 @@ typedef struct {
 } SPUFreeze_t;
 typedef long (CALLBACK* SPUfreeze)(uint32_t, SPUFreeze_t *, uint32_t);
 typedef void (CALLBACK* SPUasync)(uint32_t, uint32_t);
-typedef int  (CALLBACK* SPUplayCDDAchannel)(short *, int);
+typedef int  (CALLBACK* SPUplayCDDAchannel)(short *, int, unsigned int, int);
 
 // SPU function pointers
 extern SPUconfigure        SPU_configure;
