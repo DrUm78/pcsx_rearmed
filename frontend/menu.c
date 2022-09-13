@@ -1027,6 +1027,7 @@ void run_menu_loop()
                                         SHELL_CMD_NOTIF_SET, NOTIF_SECONDS_DISP, state_slot+1);
                                 }
                                 system(shell_cmd);
+                                stop_menu_loop = 1;
                             }
                             else{
                                 MENU_DEBUG_PRINTF("Save game - asking confirmation\n");
