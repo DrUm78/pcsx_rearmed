@@ -847,6 +847,7 @@ void run_menu_loop()
                         /// ------ Start scrolling to new menu -------
                         menuItem++;
                         if (menuItem>=nb_menu_zones) menuItem=0;
+                        if (cdrIsoMultidiskCount<=1 && menuItem>=nb_menu_zones-1) menuItem=0;
                         start_scroll=1;
 
                         /// ------ Reset menu confirmation ------
@@ -861,7 +862,10 @@ void run_menu_loop()
                         MENU_DEBUG_PRINTF("UP\n");
                         /// ------ Start scrolling to new menu -------
                         menuItem--;
-                        if (menuItem<0) menuItem=nb_menu_zones-1;
+                        if (menuItem<0){
+                            menuItem=nb_menu_zones-1;
+                            if (cdrIsoMultidiskCount<=1) menuItem=nb_menu_zones-2;
+                        }
                         start_scroll=-1;
 
                         /// ------ Reset menu confirmation ------
