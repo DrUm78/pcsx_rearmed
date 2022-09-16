@@ -9,6 +9,6 @@ make clean
 make -j16
 /opt/FunKey-sdk/bin/arm-funkey-linux-musleabihf-strip pcsx
 cp pcsx opk/
-mksquashfs ./opk pcsx_rearmed_ultimate.opk -all-root -noappend -no-exports -no-xattrs
+mksquashfs ./opk pcsx_rearmed_v1.2.3_funkey-s.opk -all-root -noappend -no-exports -no-xattrs
 md5sum pcsx
 make clean
