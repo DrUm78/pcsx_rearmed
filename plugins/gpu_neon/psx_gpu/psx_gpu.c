@@ -14,6 +14,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "common.h"
@@ -21,6 +22,13 @@
 #include "vector_ops.h"
 #endif
 #include "psx_gpu_simd.h"
+
+#if 0
+void dump_r_d(const char *name, void *dump);
+void dump_r_q(const char *name, void *dump);
+#define dumprd(n) dump_r_d(#n, n.e)
+#define dumprq(n) dump_r_q(#n, n.e)
+#endif
 
 u32 span_pixels = 0;
 u32 span_pixel_blocks = 0;
@@ -769,13 +777,13 @@ void compute_all_gradients(psx_gpu_struct *psx_gpu, vertex_struct *a,
 {                                                                              \
   u32 _num_spans = &span_edge_data_element - psx_gpu->span_edge_data;          \
   if (_num_spans > MAX_SPANS)                                                  \
-    *(int *)0 = 1;                                                             \
+    *(volatile int *)0 = 1;                                                    \
   if (_num_spans < psx_gpu->num_spans)                                         \
   {                                                                            \
     if(span_edge_data_element.num_blocks > MAX_BLOCKS_PER_ROW)                 \
-      *(int *)0 = 1;                                                           \
-    if(span_edge_data_element.y > 2048)                                        \
-      *(int *)0 = 1;                                                           \
+      *(volatile int *)0 = 2;                                                  \
+    if(span_edge_data_element.y >= 2048)                                       \
+      *(volatile int *)0 = 3;                                                  \
   }                                                                            \
 }                                                                              \
 
@@ -788,7 +796,7 @@ void compute_all_gradients(psx_gpu_struct *psx_gpu, vertex_struct *a,
   vec_2x64s alternate_x;                                                       \
   vec_2x64s alternate_dx_dy;                                                   \
   vec_4x32s alternate_x_32;                                                    \
-  vec_2x32s alternate_x_16;                                                    \
+  vec_4x16u alternate_x_16;                                                    \
                                                                                \
   vec_4x16u alternate_select;                                                  \
   vec_4x16s y_mid_point;                                                       \
@@ -4009,7 +4017,7 @@ void setup_sprite_untextured_simple(psx_gpu_struct *psx_gpu, s32 x, s32 y,
     num_width = width;
 
     vram_ptr = (void *)vram_ptr16;
-    if((long)vram_ptr16 & 2)
+    if((uintptr_t)vram_ptr16 & 2)
     {
       *vram_ptr16 = color_32bpp;
       vram_ptr = (void *)(vram_ptr16 + 1);

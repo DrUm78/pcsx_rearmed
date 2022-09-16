@@ -295,8 +295,8 @@ static void setIrq(int log_cmd)
 	if (cdr.Stat)
 	{
 		int i;
-		SysPrintf("CDR IRQ=%d cmd %02x stat %02x: ",
-			!!(cdr.Stat & cdr.Reg2), log_cmd, cdr.Stat);
+		SysPrintf("%u cdrom: CDR IRQ=%d cmd %02x stat %02x: ",
+			psxRegs.cycle, !!(cdr.Stat & cdr.Reg2), log_cmd, cdr.Stat);
 		for (i = 0; i < cdr.ResultC; i++)
 			SysPrintf("%02x ", cdr.Result[i]);
 		SysPrintf("\n");
@@ -545,7 +545,8 @@ static void cdrPlayInterrupt_Autopause()
 
 static int cdrSeekTime(unsigned char *target)
 {
-	int seekTime = abs(msf2sec(cdr.SetSectorPlay) - msf2sec(target)) * (cdReadTime / 200);
+	int diff = msf2sec(cdr.SetSectorPlay) - msf2sec(target);
+	int seekTime = abs(diff) * (cdReadTime / 200);
 	/*
 	* Gameblabla :
 	* It was originally set to 1000000 for Driver, however it is not high enough for Worms Pinball
@@ -566,7 +567,10 @@ static int cdrSeekTime(unsigned char *target)
 	return seekTime;
 }
 
+static void cdrUpdateTransferBuf(const u8 *buf);
 static void cdrReadInterrupt(void);
+static void cdrPrepCdda(s16 *buf, int samples);
+static void cdrAttenuate(s16 *buf, int samples, int stereo);
 
 void cdrPlaySeekReadInterrupt(void)
 {
@@ -613,6 +617,7 @@ void cdrPlaySeekReadInterrupt(void)
 		cdrPlayInterrupt_Autopause();
 
 	if (!cdr.Muted && !Config.Cdda) {
+		cdrPrepCdda(read_buf, CD_FRAMESIZE_RAW / 4);
 		cdrAttenuate(read_buf, CD_FRAMESIZE_RAW / 4, 1);
 		SPU_playCDDAchannel(read_buf, CD_FRAMESIZE_RAW, psxRegs.cycle, cdr.FirstSector);
 		cdr.FirstSector = 0;
@@ -646,7 +651,20 @@ void cdrInterrupt(void) {
 	int i;
 
 	if (cdr.Stat) {
-		CDR_LOG_I("cdrom: cmd %02x with irqstat %x\n", cdr.CmdInProgress, cdr.Stat);
+		CDR_LOG_I("%u cdrom: cmd %02x with irqstat %x\n",
+			psxRegs.cycle, cdr.CmdInProgress, cdr.Stat);
+		return;
+	}
+	if (cdr.Irq1Pending) {
+		// hand out the "newest" sector, according to nocash
+		cdrUpdateTransferBuf(CDR_getBuffer());
+		CDR_LOG_I("cdrom: %x:%02x:%02x loaded on ack\n",
+			cdr.Transfer[0], cdr.Transfer[1], cdr.Transfer[2]);
+		SetResultSize(1);
+		cdr.Result[0] = cdr.Irq1Pending;
+		cdr.Stat = (cdr.Irq1Pending & STATUS_ERROR) ? DiskError : DataReady;
+		cdr.Irq1Pending = 0;
+		setIrq(0x205);
 		return;
 	}
 
@@ -1101,7 +1119,8 @@ void cdrInterrupt(void) {
 	}
 	else if (cdr.Cmd && cdr.Cmd != (Cmd & 0xff)) {
 		cdr.CmdInProgress = cdr.Cmd;
-		CDR_LOG_I("cdrom: cmd %02x came before %02x finished\n", cdr.Cmd, Cmd);
+		CDR_LOG_I("%u cdrom: cmd %02x came before %02x finished\n",
+			psxRegs.cycle, cdr.Cmd, Cmd);
 	}
 
 	setIrq(Cmd);
@@ -1117,7 +1136,18 @@ void cdrInterrupt(void) {
  } while (0)
 #endif
 
-void cdrAttenuate(s16 *buf, int samples, int stereo)
+static void cdrPrepCdda(s16 *buf, int samples)
+{
+#if __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+	int i;
+	for (i = 0; i < samples; i++) {
+		buf[i * 2 + 0] = SWAP16(buf[i * 2 + 0]);
+		buf[i * 2 + 1] = SWAP16(buf[i * 2 + 1]);
+	}
+#endif
+}
+
+static void cdrAttenuate(s16 *buf, int samples, int stereo)
 {
 	int i, l, r;
 	int ll = cdr.AttenuatorLeftToLeft;
@@ -1254,25 +1284,6 @@ static void cdrReadInterrupt(void)
 	CDRPLAYSEEKREAD_INT((cdr.Mode & MODE_SPEED) ? (cdReadTime / 2) : cdReadTime, 0);
 }
 
-static void doMissedIrqs(void)
-{
-	if (cdr.Irq1Pending)
-	{
-		// hand out the "newest" sector, according to nocash
-		cdrUpdateTransferBuf(CDR_getBuffer());
-		CDR_LOG_I("cdrom: %x:%02x:%02x loaded on ack\n",
-			cdr.Transfer[0], cdr.Transfer[1], cdr.Transfer[2]);
-		SetResultSize(1);
-		cdr.Result[0] = cdr.Irq1Pending;
-		cdr.Stat = (cdr.Irq1Pending & STATUS_ERROR) ? DiskError : DataReady;
-		cdr.Irq1Pending = 0;
-		setIrq(0x205);
-		return;
-	}
-	if (!(psxRegs.interrupt & (1 << PSXINT_CDR)) && cdr.CmdInProgress)
-		CDR_INT(256);
-}
-
 /*
 cdrRead0:
 	bit 0,1 - mode
@@ -1335,7 +1346,7 @@ void cdrWrite1(unsigned char rt) {
 	}
 
 #ifdef CDR_LOG_CMD_IRQ
-	SysPrintf("CD1 write: %x (%s)", rt, CmdName[rt]);
+	SysPrintf("%u cdrom: CD1 write: %x (%s)", psxRegs.cycle, rt, CmdName[rt]);
 	if (cdr.ParamC) {
 		int i;
 		SysPrintf(" Param[%d] = {", cdr.ParamC);
@@ -1356,8 +1367,8 @@ void cdrWrite1(unsigned char rt) {
 		CDR_INT(5000);
 	}
 	else {
-		CDR_LOG_I("cdr: cmd while busy: %02x, prev %02x, busy %02x\n",
-			rt, cdr.Cmd, cdr.CmdInProgress);
+		CDR_LOG_I("%u cdrom: cmd while busy: %02x, prev %02x, busy %02x\n",
+			psxRegs.cycle, rt, cdr.Cmd, cdr.CmdInProgress);
 		if (cdr.CmdInProgress < 0x100) // no pending 2nd response
 			cdr.CmdInProgress = rt;
 	}
@@ -1417,15 +1428,20 @@ void cdrWrite3(unsigned char rt) {
 	case 0:
 		break; // transfer
 	case 1:
+		if (cdr.Stat & rt) {
 #ifdef CDR_LOG_CMD_IRQ
-		if (cdr.Stat & rt)
-			SysPrintf("ack %02x\n", cdr.Stat & rt);
+			SysPrintf("%u cdrom: ack %02x (w %02x)\n",
+				psxRegs.cycle, cdr.Stat & rt, rt);
 #endif
+			// note: Croc vs Discworld Noir
+			if (!(psxRegs.interrupt & (1 << PSXINT_CDR)) &&
+			    (cdr.CmdInProgress || cdr.Irq1Pending))
+				CDR_INT(850); // 711-993
+		}
 		cdr.Stat &= ~rt;
 
 		if (rt & 0x40)
 			cdr.ParamC = 0;
-		doMissedIrqs();
 		return;
 	case 2:
 		cdr.AttenuatorLeftToRightT = rt;
