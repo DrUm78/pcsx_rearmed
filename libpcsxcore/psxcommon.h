@@ -51,7 +51,9 @@ extern "C" {
 #include <math.h>
 #include <time.h>
 #include <ctype.h>
+#ifndef __SWITCH__
 #include <sys/types.h>
+#endif
 #include <assert.h>
 
 // Define types
@@ -114,6 +116,8 @@ extern int Log;
 
 void __Log(char *fmt, ...);
 
+#define CYCLE_MULT_DEFAULT 175
+
 typedef struct {
 	char Gpu[MAXPATHLEN];
 	char Spu[MAXPATHLEN];
@@ -121,7 +125,7 @@ typedef struct {
 	char Pad1[MAXPATHLEN];
 	char Pad2[MAXPATHLEN];
 	char Net[MAXPATHLEN];
-    char Sio1[MAXPATHLEN];
+	char Sio1[MAXPATHLEN];
 	char Mcd1[MAXPATHLEN];
 	char Mcd2[MAXPATHLEN];
 	char Bios[MAXPATHLEN];
@@ -129,20 +133,20 @@ typedef struct {
 	char PluginsDir[MAXPATHLEN];
 	char PatchesDir[MAXPATHLEN];
 	boolean Xa;
-	boolean Sio;
 	boolean Mdec;
 	boolean PsxAuto;
 	boolean Cdda;
+	boolean AsyncCD;
 	boolean CHD_Precache; /* loads disk image into memory, works with CHD only. */
 	boolean HLE;
+	boolean SlowBoot;
 	boolean Debug;
 	boolean PsxOut;
-	boolean SpuIrq;
-	boolean RCntFix;
 	boolean UseNet;
-	boolean VSyncWA;
 	boolean icache_emulation;
 	boolean DisableStalls;
+	int cycle_multiplier; // 100 for 1.0
+	int cycle_multiplier_override;
 	u8 Cpu; // CPU_DYNAREC or CPU_INTERPRETER
 	u8 PsxType; // PSX_TYPE_NTSC or PSX_TYPE_PAL
 #ifdef _WIN32
@@ -167,10 +171,6 @@ extern struct PcsxSaveFuncs SaveFuncs;
 	if (Mode == 0) SaveFuncs.read(f, ptr, size); \
 }
 
-// Make the timing events trigger faster as we are currently assuming everything
-// takes one cycle, which is not the case on real hardware.
-// FIXME: Count the proper cycle and get rid of this
-#define BIAS	2
 #define PSXCLK	33868800	/* 33.8688 MHz */
 
 enum {

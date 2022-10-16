@@ -1562,17 +1562,17 @@ static void menu_sync_config(void)
 		Config.PsxAuto = 0;
 		Config.PsxType = region - 1;
 	}
-	cycle_multiplier = 10000 / psx_clock;
+	Config.cycle_multiplier = 10000 / psx_clock;
 
 	switch (in_type_sel1) {
-	case 1:  in_type1 = PSE_PAD_TYPE_ANALOGPAD; break;
-	case 2:  in_type1 = PSE_PAD_TYPE_GUNCON;    break;
-	default: in_type1 = PSE_PAD_TYPE_STANDARD;
+	case 1:  in_type[0] = PSE_PAD_TYPE_ANALOGPAD; break;
+	case 2:  in_type[0] = PSE_PAD_TYPE_NEGCON;    break;
+	default: in_type[0] = PSE_PAD_TYPE_STANDARD;
 	}
 	switch (in_type_sel2) {
-	case 1:  in_type2 = PSE_PAD_TYPE_ANALOGPAD; break;
-	case 2:  in_type2 = PSE_PAD_TYPE_GUNCON;    break;
-	default: in_type2 = PSE_PAD_TYPE_STANDARD;
+	case 1:  in_type[1] = PSE_PAD_TYPE_ANALOGPAD; break;
+	case 2:  in_type[1] = PSE_PAD_TYPE_NEGCON;    break;
+	default: in_type[1] = PSE_PAD_TYPE_STANDARD;
 	}
 	if (in_evdev_allow_abs_only != allow_abs_only_old) {
 		in_probe();
@@ -1647,14 +1647,10 @@ static const struct {
 	CE_CONFIG_STR(Spu),
 //	CE_CONFIG_STR(Cdr),
 	CE_CONFIG_VAL(Xa),
-//	CE_CONFIG_VAL(Sio),
 	CE_CONFIG_VAL(Mdec),
 	CE_CONFIG_VAL(Cdda),
 	CE_CONFIG_VAL(Debug),
 	CE_CONFIG_VAL(PsxOut),
-	CE_CONFIG_VAL(SpuIrq),
-	CE_CONFIG_VAL(RCntFix),
-	CE_CONFIG_VAL(VSyncWA),
 	CE_CONFIG_VAL(icache_emulation),
 	CE_CONFIG_VAL(DisableStalls),
 	CE_CONFIG_VAL(Cpu),
@@ -2819,8 +2815,6 @@ static int menu_loop_plugin_options(int id, int keys)
 // ------------ adv options menu ------------
 
 #ifndef DRC_DISABLE
-static const char h_cfg_psxclk[]  = "Over/under-clock the PSX, default is " DEFAULT_PSX_CLOCK_S "\n"
-				    "(lower value - less work for the emu, may be faster)";
 static const char h_cfg_noch[]    = "Disables game-specific compatibility hacks";
 static const char h_cfg_nosmc[]   = "Will cause crashes when loading, break memcards";
 static const char h_cfg_gteunn[]  = "May cause graphical glitches";
@@ -2831,7 +2825,6 @@ static const char h_cfg_stalls[]  = "Will cause some games to run too fast";
 static menu_entry e_menu_speed_hacks[] =
 {
 #ifndef DRC_DISABLE
-	mee_range_h   ("PSX CPU clock, %%",        0, psx_clock, 1, 500, h_cfg_psxclk),
 	mee_onoff_h   ("Disable compat hacks",     0, new_dynarec_hacks, NDHACK_NO_COMPAT_HACKS, h_cfg_noch),
 	mee_onoff_h   ("Disable SMC checks",       0, new_dynarec_hacks, NDHACK_NO_SMC_CHECK, h_cfg_nosmc),
 	mee_onoff_h   ("Assume GTE regs unneeded", 0, new_dynarec_hacks, NDHACK_GTE_UNNEEDED, h_cfg_gteunn),
@@ -2857,21 +2850,16 @@ static const char h_cfg_fl[]     = "Frame Limiter keeps the game from running to
 static const char h_cfg_xa[]     = "Disables XA sound, which can sometimes improve performance";
 static const char h_cfg_cdda[]   = "Disable CD Audio for a performance boost\n"
 				   "(proper .cue/.bin dump is needed otherwise)";
-//static const char h_cfg_sio[]    = "You should not need this, breaks games";
-static const char h_cfg_spuirq[] = "Compatibility tweak; should be left off";
-static const char h_cfg_rcnt2[]  = "InuYasha Sengoku Battle Fix\n"
-				   "(timing hack, breaks other games)";
-#ifdef DRC_DISABLE
-static const char h_cfg_rcnt1[]  = "Parasite Eve 2, Vandal Hearts 1/2 Fix\n"
-				   "(timing hack, breaks other games)";
-#else
+#ifndef DRC_DISABLE
 static const char h_cfg_nodrc[]  = "Disable dynamic recompiler and use interpreter\n"
 				   "Might be useful to overcome some dynarec bugs";
 #endif
 static const char h_cfg_shacks[] = "Breaks games but may give better performance";
 static const char h_cfg_icache[] = "Support F1 games (only when dynarec is off)";
+static const char h_cfg_psxclk[]  = "Over/under-clock the PSX, default is " DEFAULT_PSX_CLOCK_S "\n"
+				    "(adjust this if the game is too slow/too fast/hangs)";
 
-enum { AMO_XA, AMO_CDDA, AMO_SIO, AMO_SPUI, AMO_IC, AMO_RCNT, AMO_WA, AMO_CPU };
+enum { AMO_XA, AMO_CDDA, AMO_IC, AMO_CPU };
 
 static menu_entry e_menu_adv_options[] =
 {
@@ -2880,16 +2868,11 @@ static menu_entry e_menu_adv_options[] =
 	mee_onoff_h   ("Disable Frame Limiter",  0, g_opts, OPT_NO_FRAMELIM, h_cfg_fl),
 	mee_onoff_h   ("Disable XA Decoding",    0, menu_iopts[AMO_XA],   1, h_cfg_xa),
 	mee_onoff_h   ("Disable CD Audio",       0, menu_iopts[AMO_CDDA], 1, h_cfg_cdda),
-	//mee_onoff_h   ("SIO IRQ Always Enabled", 0, menu_iopts[AMO_SIO],  1, h_cfg_sio),
-	mee_onoff_h   ("SPU IRQ Always Enabled", 0, menu_iopts[AMO_SPUI], 1, h_cfg_spuirq),
 	mee_onoff_h   ("ICache emulation",       0, menu_iopts[AMO_IC],   1, h_cfg_icache),
-#ifdef DRC_DISABLE
-	mee_onoff_h   ("Rootcounter hack",       0, menu_iopts[AMO_RCNT], 1, h_cfg_rcnt1),
-#endif
-	mee_onoff_h   ("Rootcounter hack 2",     0, menu_iopts[AMO_WA],   1, h_cfg_rcnt2),
 #if !defined(DRC_DISABLE) || defined(LIGHTREC)
 	mee_onoff_h   ("Disable dynarec (slow!)",0, menu_iopts[AMO_CPU],  1, h_cfg_nodrc),
 #endif
+	mee_range_h   ("PSX CPU clock, %",       0, psx_clock, 1, 500, h_cfg_psxclk),
 	mee_handler_h ("[Speed hacks]",             menu_loop_speed_hacks, h_cfg_shacks),
 	mee_end,
 };
@@ -2903,11 +2886,7 @@ static int menu_loop_adv_options(int id, int keys)
 	} opts[] = {
 		{ &Config.Xa,      &menu_iopts[AMO_XA] },
 		{ &Config.Cdda,    &menu_iopts[AMO_CDDA] },
-		{ &Config.Sio,     &menu_iopts[AMO_SIO] },
-		{ &Config.SpuIrq,  &menu_iopts[AMO_SPUI] },
 		{ &Config.icache_emulation, &menu_iopts[AMO_IC] },
-		{ &Config.RCntFix, &menu_iopts[AMO_RCNT] },
-		{ &Config.VSyncWA, &menu_iopts[AMO_WA] },
 		{ &Config.Cpu,     &menu_iopts[AMO_CPU] },
 	};
 	int i;
@@ -3967,6 +3946,7 @@ void menu_prepare_emu(void)
 		psxCpu->Reset();
 	}
 
+	menu_sync_config();
 	psxCpu->ApplyConfig();
 
 	// core doesn't care about Config.Cdda changes,
@@ -3974,7 +3954,6 @@ void menu_prepare_emu(void)
 	if (Config.Cdda)
 		CDR_stop();
 
-	menu_sync_config();
 	if (cpu_clock > 0)
 		plat_target_cpu_clock_set(cpu_clock);
 

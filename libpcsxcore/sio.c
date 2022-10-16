@@ -24,6 +24,10 @@
 #include "sio.h"
 #include <sys/stat.h>
 
+#ifdef USE_LIBRETRO_VFS
+#include <streams/file_stream_transforms.h>
+#endif
+
 // Status Flags
 #define TX_RDY		0x0001
 #define RX_RDY		0x0002
@@ -68,12 +72,10 @@ char Mcd1Data[MCD_SIZE], Mcd2Data[MCD_SIZE];
 char McdDisable[2];
 
 #define SIO_INT(eCycle) { \
-	if (!Config.Sio) { \
-		psxRegs.interrupt |= (1 << PSXINT_SIO); \
-		psxRegs.intCycle[PSXINT_SIO].cycle = eCycle; \
-		psxRegs.intCycle[PSXINT_SIO].sCycle = psxRegs.cycle; \
-		new_dyna_set_event(PSXINT_SIO, eCycle); \
-	} \
+	psxRegs.interrupt |= (1 << PSXINT_SIO); \
+	psxRegs.intCycle[PSXINT_SIO].cycle = eCycle; \
+	psxRegs.intCycle[PSXINT_SIO].sCycle = psxRegs.cycle; \
+	new_dyna_set_event(PSXINT_SIO, eCycle); \
 }
 
 // clk cycle byte
@@ -409,6 +411,12 @@ void LoadMcd(int mcd, char *str) {
 	}
 
 	McdDisable[mcd - 1] = 0;
+#ifdef HAVE_LIBRETRO
+	// memcard1 is handled by libretro
+	if (mcd == 1)
+		return;
+#endif
+
 	if (str == NULL || strcmp(str, "none") == 0) {
 		McdDisable[mcd - 1] = 1;
 		return;
@@ -430,7 +438,12 @@ void LoadMcd(int mcd, char *str) {
 				else if(buf.st_size == MCD_SIZE + 3904)
 					fseek(f, 3904, SEEK_SET);
 			}
-			fread(data, 1, MCD_SIZE, f);
+			if (fread(data, 1, MCD_SIZE, f) != MCD_SIZE) {
+#ifndef NDEBUG
+				SysPrintf(_("File IO error in <%s:%s>.\n"), __FILE__, __func__);
+#endif
+				memset(data, 0x00, MCD_SIZE);
+			}
 			fclose(f);
 		}
 		else
@@ -445,7 +458,12 @@ void LoadMcd(int mcd, char *str) {
 			else if(buf.st_size == MCD_SIZE + 3904)
 				fseek(f, 3904, SEEK_SET);
 		}
-		fread(data, 1, MCD_SIZE, f);
+		if (fread(data, 1, MCD_SIZE, f) != MCD_SIZE) {
+#ifndef NDEBUG
+			SysPrintf(_("File IO error in <%s:%s>.\n"), __FILE__, __func__);
+#endif
+			memset(data, 0x00, MCD_SIZE);
+		}
 		fclose(f);
 	}
 }

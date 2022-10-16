@@ -55,7 +55,7 @@ typedef void (irq_func)();
 static irq_func * const irq_funcs[] = {
 	[PSXINT_SIO]	= sioInterrupt,
 	[PSXINT_CDR]	= cdrInterrupt,
-	[PSXINT_CDREAD]	= cdrPlaySeekReadInterrupt,
+	[PSXINT_CDREAD]	= cdrPlayReadInterrupt,
 	[PSXINT_GPUDMA]	= gpuInterrupt,
 	[PSXINT_MDECOUTDMA] = mdec1Interrupt,
 	[PSXINT_SPUDMA]	= spuInterrupt,
@@ -190,7 +190,7 @@ void new_dyna_freeze(void *f, int mode)
 	//printf("drc: %d block info entries %s\n", size/8, mode ? "saved" : "loaded");
 }
 
-#ifndef DRC_DISABLE
+#if !defined(DRC_DISABLE) && !defined(LIGHTREC)
 
 /* GTE stuff */
 void *gte_handlers[64];
@@ -394,7 +394,7 @@ static void ari64_apply_config()
 	else
 		new_dynarec_hacks &= ~NDHACK_NO_STALLS;
 
-	if (cycle_multiplier != cycle_multiplier_old
+	if (Config.cycle_multiplier != cycle_multiplier_old
 	    || new_dynarec_hacks != new_dynarec_hacks_old)
 	{
 		new_dynarec_clear_full();
@@ -424,8 +424,6 @@ unsigned int address;
 int pending_exception, stop;
 unsigned int next_interupt;
 int new_dynarec_did_compile;
-int cycle_multiplier;
-int cycle_multiplier_override;
 int cycle_multiplier_old;
 int new_dynarec_hacks_pergame;
 int new_dynarec_hacks_old;

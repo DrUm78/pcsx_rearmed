@@ -1,3 +1,6 @@
+#ifndef __MENU_H__
+#define __MENU_H__
+
 void menu_init(void);
 void menu_prepare_emu(void);
 void menu_loop(void);
@@ -93,3 +96,4 @@ extern int brightness_percentage;
 extern int stop_menu_loop;
 extern char *quick_save_file;
 extern char *cfg_file_rom;
+#endif /* __MENU_H__ */

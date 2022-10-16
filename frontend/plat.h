@@ -24,4 +24,4 @@ void  plat_gvideo_close(void);
 void SDL_Copy_Rotate_270(uint16_t *source_pixels, uint16_t *dest_pixels,
                 int src_w, int src_h, int dst_w, int dst_h);
 
-#endif // __PLAT_H__
+#endif /* __PLAT_H__ */

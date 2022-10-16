@@ -11,7 +11,7 @@
 #include <unistd.h>
 #include <signal.h>
 #include <time.h>
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(NO_DYLIB)
 #include <dlfcn.h>
 #endif
 
@@ -29,6 +29,14 @@
 #include "../plugins/dfsound/spu_config.h"
 #include "arm_features.h"
 #include "revision.h"
+
+#if defined(__has_builtin)
+#define DO_CPU_CHECKS __has_builtin(__builtin_cpu_init)
+#elif defined(__x86_64__) || defined(__i386__)
+#define DO_CPU_CHECKS 1
+#else
+#define DO_CPU_CHECKS 0
+#endif
 
 #ifndef NO_FRONTEND
 #include "libpicofe/input.h"
@@ -196,9 +204,10 @@ static void set_default_paths(void)
 void emu_set_default_config(void)
 {
 	// try to set sane config on which most games work
-	Config.Xa = Config.Cdda = Config.Sio =
-	Config.icache_emulation = Config.SpuIrq = Config.RCntFix = Config.VSyncWA = 0;
+	Config.Xa = Config.Cdda = 0;
+	Config.icache_emulation = 0;
 	Config.PsxAuto = 1;
+	Config.cycle_multiplier = CYCLE_MULT_DEFAULT;
 
 	pl_rearmed_cbs.gpu_neon.allow_interlace = 2; // auto
 	pl_rearmed_cbs.gpu_neon.enhancement_enable =
@@ -224,16 +233,17 @@ void emu_set_default_config(void)
 	spu_config.iVolume = 768;
 	spu_config.iTempo = 0;
 	spu_config.iUseThread = 1; // no effect if only 1 core is detected
-#ifdef HAVE_PRE_ARMV7 /* XXX GPH hack */
+#if defined(HAVE_PRE_ARMV7) && !defined(_3DS) /* XXX GPH hack */
 	spu_config.iUseReverb = 0;
 	spu_config.iUseInterpolation = 0;
+#ifndef HAVE_LIBRETRO
 	spu_config.iTempo = 1;
 #endif
+#endif
 	new_dynarec_hacks = 0;
-	cycle_multiplier = 200;
 
-	in_type1 = PSE_PAD_TYPE_STANDARD;
-	in_type2 = PSE_PAD_TYPE_STANDARD;
+	in_type[0] = PSE_PAD_TYPE_STANDARD;
+	in_type[1] = PSE_PAD_TYPE_STANDARD;
 }
 
 void do_emu_action(void)
@@ -541,7 +551,7 @@ static int cdidcmp(const char *id1, const char *id2)
 
 static void parse_cwcheat(void)
 {
-	char line[256], buf[64], name[64], *p;
+	char line[256], buf[256], name[256], *p;
 	int newcheat = 1;
 	u32 a, v;
 	FILE *f;
@@ -641,6 +651,24 @@ void emu_on_new_cd(int show_hud_msg)
 	}
 }
 
+static void log_wrong_cpu(void)
+{
+#if DO_CPU_CHECKS
+	__builtin_cpu_init();
+	#define CHECK_CPU(name) if (!__builtin_cpu_supports(name)) \
+		SysPrintf("ERROR: compiled for " name ", which is unsupported by the CPU\n")
+#ifdef __SSE2__
+	CHECK_CPU("sse2");
+#endif
+#ifdef __SSSE3__
+	CHECK_CPU("ssse3");
+#endif
+#ifdef __SSE4_1__
+	CHECK_CPU("sse4.1");
+#endif
+#endif // DO_CPU_CHECKS
+}
+
 int emu_core_preinit(void)
 {
 	// what is the name of the config file?
@@ -654,6 +682,8 @@ int emu_core_preinit(void)
 	if (emuLog == NULL)
 #endif
 	emuLog = stdout;
+
+	log_wrong_cpu();
 
 	SetIsoFile(NULL);
 
@@ -1093,10 +1123,10 @@ void SysReset() {
 	// reset can run code, timing must be set
 	pl_timing_prepare(Config.PsxType);
 
-	EmuReset();
-
 	// hmh core forgets this
 	CDR_stop();
+   
+	EmuReset();
 
 	GPU_updateLace = real_lace;
 	g_emu_resetting = 0;
@@ -1149,7 +1179,7 @@ int emu_save_state(int slot)
 		return ret;
 
 	ret = SaveState(fname);
-#ifdef HAVE_PRE_ARMV7 /* XXX GPH hack */
+#if defined(HAVE_PRE_ARMV7) && !defined(_3DS) && !defined(__SWITCH__) /* XXX GPH hack */
 	sync();
 #endif
 	SysPrintf("* %s \"%s\" [%d]\n",
@@ -1171,6 +1201,7 @@ int emu_load_state(int slot)
 	return LoadState(fname);
 }
 
+#ifndef HAVE_LIBRETRO
 #ifndef ANDROID
 
 void SysPrintf(const char *fmt, ...) {
@@ -1195,6 +1226,7 @@ void SysPrintf(const char *fmt, ...) {
 }
 
 #endif
+#endif /* HAVE_LIBRETRO */
 
 void SysMessage(const char *fmt, ...) {
 	va_list list;
@@ -1244,14 +1276,15 @@ static int _OpenPlugins(void) {
 
 	if (Config.UseNet && !NetOpened) {
 		netInfo info;
-		char path[MAXPATHLEN];
+		char path[MAXPATHLEN * 2];
 		char dotdir[MAXPATHLEN];
 
 		MAKE_ABSOLUTE_PATH(dotdir, "~/.pcsx/plugins/", NULL);
 
 		strcpy(info.EmuName, "PCSX");
-		strncpy(info.CdromID, CdromId, 9);
-		strncpy(info.CdromLabel, CdromLabel, 9);
+		memcpy(info.CdromID, CdromId, 9); /* no \0 trailing character? */
+		memcpy(info.CdromLabel, CdromLabel, 9);
+		info.CdromLabel[9] = '\0';
 		info.psxMem = psxM;
 		info.GPU_showScreenPic = GPU_showScreenPic;
 		info.GPU_displayText = GPU_displayText;
@@ -1363,7 +1396,7 @@ void *SysLoadLibrary(const char *lib) {
 				return (void *)(uintptr_t)(PLUGIN_DL_BASE + builtin_plugin_ids[i]);
 	}
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(NO_DYLIB)
 	ret = dlopen(lib, RTLD_NOW);
 	if (ret == NULL)
 		SysMessage("dlopen: %s", dlerror());
@@ -1380,7 +1413,7 @@ void *SysLoadSym(void *lib, const char *sym) {
 	if (PLUGIN_DL_BASE <= plugid && plugid < PLUGIN_DL_BASE + ARRAY_SIZE(builtin_plugins))
 		return plugin_link(plugid - PLUGIN_DL_BASE, sym);
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(NO_DYLIB)
 	return dlsym(lib, sym);
 #else
 	return NULL;
@@ -1388,7 +1421,9 @@ void *SysLoadSym(void *lib, const char *sym) {
 }
 
 const char *SysLibError() {
-#ifndef _WIN32
+#if defined(NO_DYLIB)
+	return NULL;
+#elif !defined(_WIN32)
 	return dlerror();
 #else
 	return "not supported";
@@ -1401,8 +1436,7 @@ void SysCloseLibrary(void *lib) {
 	if (PLUGIN_DL_BASE <= plugid && plugid < PLUGIN_DL_BASE + ARRAY_SIZE(builtin_plugins))
 		return;
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(NO_DYLIB)
 	dlclose(lib);
 #endif
 }
-

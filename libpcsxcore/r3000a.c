@@ -61,6 +61,7 @@ void psxReset() {
 	psxRegs.CP0.r[12] = 0x10900000; // COP0 enabled | BEV = 1 | TS = 1
 	psxRegs.CP0.r[15] = 0x00000002; // PRevID = Revision ID, same as R3000A
 
+	psxCpu->ApplyConfig();
 	psxCpu->Reset();
 
 	psxHwReset();
@@ -76,10 +77,11 @@ void psxReset() {
 }
 
 void psxShutdown() {
-	psxMemShutdown();
 	psxBiosShutdown();
 
 	psxCpu->Shutdown();
+
+	psxMemShutdown();
 }
 
 void psxException(u32 code, u32 bd) {
@@ -123,7 +125,7 @@ void psxBranchTest() {
 		psxRcntUpdate();
 
 	if (psxRegs.interrupt) {
-		if ((psxRegs.interrupt & (1 << PSXINT_SIO)) && !Config.Sio) { // sio
+		if ((psxRegs.interrupt & (1 << PSXINT_SIO))) { // sio
 			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_SIO].sCycle) >= psxRegs.intCycle[PSXINT_SIO].cycle) {
 				psxRegs.interrupt &= ~(1 << PSXINT_SIO);
 				sioInterrupt();
@@ -138,7 +140,7 @@ void psxBranchTest() {
 		if (psxRegs.interrupt & (1 << PSXINT_CDREAD)) { // cdr read
 			if ((psxRegs.cycle - psxRegs.intCycle[PSXINT_CDREAD].sCycle) >= psxRegs.intCycle[PSXINT_CDREAD].cycle) {
 				psxRegs.interrupt &= ~(1 << PSXINT_CDREAD);
-				cdrPlaySeekReadInterrupt();
+				cdrPlayReadInterrupt();
 			}
 		}
 		if (psxRegs.interrupt & (1 << PSXINT_GPUDMA)) { // gpu dma
