@@ -54,7 +54,6 @@ static FILE *subHandle = NULL;
 
 static boolean subChanMixed = FALSE;
 static boolean subChanRaw = FALSE;
-static boolean subChanMissing = FALSE;
 
 static boolean multifile = FALSE;
 
@@ -84,16 +83,18 @@ static struct {
 
 #ifdef HAVE_CHD
 static struct {
-	unsigned char (*buffer)[CD_FRAMESIZE_RAW + SUB_FRAMESIZE];
+	unsigned char *buffer;
 	chd_file* chd;
 	const chd_header* header;
 	unsigned int sectors_per_hunk;
-	unsigned int current_hunk;
+	unsigned int current_hunk[2];
+	unsigned int current_buffer;
 	unsigned int sector_in_hunk;
 } *chd_img;
 #endif
 
-int (*cdimg_read_func)(FILE *f, unsigned int base, void *dest, int sector);
+static int (*cdimg_read_func)(FILE *f, unsigned int base, void *dest, int sector);
+static int (*cdimg_read_sub_func)(FILE *f, int sector);
 
 char* CALLBACK CDR__getDriveLetter(void);
 long CALLBACK CDR__configure(void);
@@ -952,12 +953,13 @@ static int handlechd(const char *isofile) {
 
 	chd_img->header = chd_get_header(chd_img->chd);
 
-	chd_img->buffer = malloc(chd_img->header->hunkbytes);
+	chd_img->buffer = malloc(chd_img->header->hunkbytes * 2);
 	if (chd_img->buffer == NULL)
 		goto fail_io;
 
 	chd_img->sectors_per_hunk = chd_img->header->hunkbytes / (CD_FRAMESIZE_RAW + SUB_FRAMESIZE);
-	chd_img->current_hunk = (unsigned int)-1;
+	chd_img->current_hunk[0] = (unsigned int)-1;
+	chd_img->current_hunk[1] = (unsigned int)-1;
 
 	cddaBigEndian = TRUE;
 
@@ -1070,29 +1072,48 @@ static int opensbifile(const char *isoname) {
 
 static int cdread_normal(FILE *f, unsigned int base, void *dest, int sector)
 {
-	fseek(f, base + sector * CD_FRAMESIZE_RAW, SEEK_SET);
-	return fread(dest, 1, CD_FRAMESIZE_RAW, f);
+	int ret;
+	if (fseek(f, base + sector * CD_FRAMESIZE_RAW, SEEK_SET))
+		goto fail_io;
+	ret = fread(dest, 1, CD_FRAMESIZE_RAW, f);
+	if (ret <= 0)
+		goto fail_io;
+	return ret;
+
+fail_io:
+	// often happens in cdda gaps of a split cue/bin, so not logged
+	//SysPrintf("File IO error %d, base %u, sector %u\n", errno, base, sector);
+	return -1;
 }
 
 static int cdread_sub_mixed(FILE *f, unsigned int base, void *dest, int sector)
 {
 	int ret;
 
-	fseek(f, base + sector * (CD_FRAMESIZE_RAW + SUB_FRAMESIZE), SEEK_SET);
+	if (fseek(f, base + sector * (CD_FRAMESIZE_RAW + SUB_FRAMESIZE), SEEK_SET))
+		goto fail_io;
 	ret = fread(dest, 1, CD_FRAMESIZE_RAW, f);
+	if (ret <= 0)
+		goto fail_io;
+	return ret;
+
+fail_io:
+	//SysPrintf("File IO error %d, base %u, sector %u\n", errno, base, sector);
+	return -1;
+}
+
+static int cdread_sub_sub_mixed(FILE *f, int sector)
+{
+	if (fseek(f, sector * (CD_FRAMESIZE_RAW + SUB_FRAMESIZE) + CD_FRAMESIZE_RAW, SEEK_SET))
+		goto fail_io;
 	if (fread(subbuffer, 1, SUB_FRAMESIZE, f) != SUB_FRAMESIZE)
 		goto fail_io;
 
-	if (subChanRaw) DecodeRawSubData();
-	goto done;
+	return SUB_FRAMESIZE;
 
 fail_io:
-#ifndef NDEBUG
-	SysPrintf(_("File IO error in <%s:%s>.\n"), __FILE__, __func__);
-#endif
-
-done:
-	return ret;
+	SysPrintf("subchannel: file IO error %d, sector %u\n", errno, sector);
+	return -1;
 }
 
 static int uncompress2_pcsx(void *out, unsigned long *out_size, void *in, unsigned long in_size)
@@ -1197,32 +1218,65 @@ finish:
 }
 
 #ifdef HAVE_CHD
+static unsigned char *chd_get_sector(unsigned int current_buffer, unsigned int sector_in_hunk)
+{
+	return chd_img->buffer
+		+ current_buffer * chd_img->header->hunkbytes
+		+ sector_in_hunk * (CD_FRAMESIZE_RAW + SUB_FRAMESIZE);
+}
+
 static int cdread_chd(FILE *f, unsigned int base, void *dest, int sector)
 {
 	int hunk;
 
-	if (base)
-		sector += base;
+	assert(base == 0);
 
 	hunk = sector / chd_img->sectors_per_hunk;
 	chd_img->sector_in_hunk = sector % chd_img->sectors_per_hunk;
 
-	if (hunk != chd_img->current_hunk)
+	if (hunk == chd_img->current_hunk[0])
+		chd_img->current_buffer = 0;
+	else if (hunk == chd_img->current_hunk[1])
+		chd_img->current_buffer = 1;
+	else
 	{
-		chd_read(chd_img->chd, hunk, chd_img->buffer);
-		chd_img->current_hunk = hunk;
+		chd_read(chd_img->chd, hunk, chd_img->buffer +
+			chd_img->current_buffer * chd_img->header->hunkbytes);
+		chd_img->current_hunk[chd_img->current_buffer] = hunk;
 	}
 
 	if (dest != cdbuffer) // copy avoid HACK
-		memcpy(dest, chd_img->buffer[chd_img->sector_in_hunk],
+		memcpy(dest, chd_get_sector(chd_img->current_buffer, chd_img->sector_in_hunk),
 			CD_FRAMESIZE_RAW);
-	if (subChanMixed) {
-		memcpy(subbuffer, chd_img->buffer[chd_img->sector_in_hunk] + CD_FRAMESIZE_RAW,
-			SUB_FRAMESIZE);
-		if (subChanRaw)
-			DecodeRawSubData();
-	}
 	return CD_FRAMESIZE_RAW;
+}
+
+static int cdread_sub_chd(FILE *f, int sector)
+{
+	unsigned int sector_in_hunk;
+	unsigned int buffer;
+	int hunk;
+
+	if (!subChanMixed)
+		return -1;
+
+	hunk = sector / chd_img->sectors_per_hunk;
+	sector_in_hunk = sector % chd_img->sectors_per_hunk;
+
+	if (hunk == chd_img->current_hunk[0])
+		buffer = 0;
+	else if (hunk == chd_img->current_hunk[1])
+		buffer = 1;
+	else
+	{
+		buffer = chd_img->current_buffer ^ 1;
+		chd_read(chd_img->chd, hunk, chd_img->buffer +
+			buffer * chd_img->header->hunkbytes);
+		chd_img->current_hunk[buffer] = hunk;
+	}
+
+	memcpy(subbuffer, chd_get_sector(buffer, sector_in_hunk) + CD_FRAMESIZE_RAW, SUB_FRAMESIZE);
+	return SUB_FRAMESIZE;
 }
 #endif
 
@@ -1238,7 +1292,7 @@ static int cdread_2048(FILE *f, unsigned int base, void *dest, int sector)
 	sec2msf(sector + 2 * 75, (char *)&cdbuffer[12]);
 	cdbuffer[12 + 3] = 1;
 
-	return ret;
+	return 12*2 + ret;
 }
 
 static unsigned char * CALLBACK ISOgetBuffer_compr(void) {
@@ -1247,7 +1301,7 @@ static unsigned char * CALLBACK ISOgetBuffer_compr(void) {
 
 #ifdef HAVE_CHD
 static unsigned char * CALLBACK ISOgetBuffer_chd(void) {
-	return chd_img->buffer[chd_img->sector_in_hunk] + 12;
+	return chd_get_sector(chd_img->current_buffer, chd_img->sector_in_hunk) + 12;
 }
 #endif
 
@@ -1298,6 +1352,7 @@ static long CALLBACK ISOopen(void) {
 
 	CDR_getBuffer = ISOgetBuffer;
 	cdimg_read_func = cdread_normal;
+	cdimg_read_sub_func = NULL;
 
 	if (parsetoc(GetIsoFile()) == 0) {
 		strcat(image_str, "[+toc]");
@@ -1326,6 +1381,7 @@ static long CALLBACK ISOopen(void) {
 		strcat(image_str, "[+chd]");
 		CDR_getBuffer = ISOgetBuffer_chd;
 		cdimg_read_func = cdread_chd;
+		cdimg_read_sub_func = cdread_sub_chd;
 		is_chd = 1;
 	}
 #endif
@@ -1387,10 +1443,14 @@ static long CALLBACK ISOopen(void) {
 
 	PrintTracks();
 
-	if (subChanMixed && !is_chd)
+	if (subChanMixed && !is_chd) {
 		cdimg_read_func = cdread_sub_mixed;
-	else if (isMode1ISO)
+		cdimg_read_sub_func = cdread_sub_sub_mixed;
+	}
+	else if (isMode1ISO) {
 		cdimg_read_func = cdread_2048;
+		cdimg_read_sub_func = NULL;
+	}
 
 	// make sure we have another handle open for cdda
 	if (numtracks > 1 && ti[1].handle == NULL) {
@@ -1530,27 +1590,12 @@ static boolean CALLBACK ISOreadTrack(unsigned char *time) {
 		return 0;
 	}
 
-	if (pregapOffset) {
-		subChanMissing = FALSE;
-		if (sector >= pregapOffset) {
-			sector -= 2 * 75;
-			if (sector < pregapOffset)
-				subChanMissing = TRUE;
-		}
-	}
+	if (pregapOffset && sector >= pregapOffset)
+		sector -= 2 * 75;
 
 	ret = cdimg_read_func(cdHandle, 0, cdbuffer, sector);
-	if (ret < 0)
+	if (ret < 12*2 + 2048)
 		return 0;
-
-	if (subHandle != NULL) {
-		fseek(subHandle, sector * SUB_FRAMESIZE, SEEK_SET);
-		if (fread(subbuffer, 1, SUB_FRAMESIZE, subHandle) != SUB_FRAMESIZE)
-			/* Faulty subchannel data shouldn't cause a read failure */
-			return 1;
-
-		if (subChanRaw) DecodeRawSubData();
-	}
 
 	return 1;
 }
@@ -1570,12 +1615,29 @@ static long CALLBACK ISOstop(void) {
 }
 
 // gets subchannel data
-static unsigned char* CALLBACK ISOgetBufferSub(void) {
-	if ((subHandle != NULL || subChanMixed) && !subChanMissing) {
-		return subbuffer;
+static unsigned char* CALLBACK ISOgetBufferSub(int sector) {
+	if (pregapOffset && sector >= pregapOffset) {
+		sector -= 2 * 75;
+		if (sector < pregapOffset) // ?
+			return NULL;
 	}
 
-	return NULL;
+	if (cdimg_read_sub_func != NULL) {
+		if (cdimg_read_sub_func(cdHandle, sector) != SUB_FRAMESIZE)
+			return NULL;
+	}
+	else if (subHandle != NULL) {
+		if (fseek(subHandle, sector * SUB_FRAMESIZE, SEEK_SET))
+			return NULL;
+		if (fread(subbuffer, 1, SUB_FRAMESIZE, subHandle) != SUB_FRAMESIZE)
+			return NULL;
+	}
+	else {
+		return NULL;
+	}
+
+	if (subChanRaw) DecodeRawSubData();
+	return subbuffer;
 }
 
 static long CALLBACK ISOgetStatus(struct CdrStat *stat) {
