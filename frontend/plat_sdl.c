@@ -2092,13 +2092,13 @@ void *plat_gvideo_flip(void)
       break;
       case ASPECT_RATIOS_TYPE_CROPPED:
       flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, hw_screen,
-        MAX(plat_sdl_screen->w*RES_HW_SCREEN_VERTICAL/plat_sdl_screen->h, RES_HW_SCREEN_HORIZONTAL),
+        MAX(320, RES_HW_SCREEN_HORIZONTAL), // DrUm78: width for 4:3 cropped mode
         RES_HW_SCREEN_VERTICAL);
       break;
       case ASPECT_RATIOS_TYPE_SCALED:
       flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
         RES_HW_SCREEN_HORIZONTAL,
-        MIN(plat_sdl_screen->h*RES_HW_SCREEN_HORIZONTAL/plat_sdl_screen->w, RES_HW_SCREEN_VERTICAL));
+        MIN(180, RES_HW_SCREEN_VERTICAL)); // DrUm78: height for 4:3 scaled mode
       break;
       default:
       printf("Wrong aspect ratio value: %d\n", aspect_ratio);
