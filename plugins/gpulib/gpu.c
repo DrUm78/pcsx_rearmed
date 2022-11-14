@@ -527,7 +527,7 @@ void GPUwriteData(uint32_t data)
     flush_cmd_buffer();
 }
 
-long GPUdmaChain(uint32_t *rambase, uint32_t start_addr)
+long GPUdmaChain(uint32_t *rambase, uint32_t start_addr, uint32_t *progress_addr)
 {
   uint32_t addr, *list, ld_addr = 0;
   int len, left, count;
@@ -551,14 +551,28 @@ long GPUdmaChain(uint32_t *rambase, uint32_t start_addr)
     if (len > 0)
       cpu_cycles += 5 + len;
 
-    log_io(".chain %08x #%d\n", (list - rambase) * 4, len);
+    log_io(".chain %08lx #%d+%d\n",
+      (long)(list - rambase) * 4, len, gpu.cmd_len);
+    if (unlikely(gpu.cmd_len > 0)) {
+      memcpy(gpu.cmd_buffer + gpu.cmd_len, list + 1, len * 4);
+      gpu.cmd_len += len;
+      flush_cmd_buffer();
+      continue;
+    }
 
     if (len) {
       left = do_cmd_buffer(list + 1, len);
-      if (left)
-        log_anomaly("GPUdmaChain: discarded %d/%d words\n", left, len);
+      if (left) {
+        memcpy(gpu.cmd_buffer, list + 1 + len - left, left * 4);
+        gpu.cmd_len = left;
+        log_anomaly("GPUdmaChain: %d/%d words left\n", left, len);
+      }
     }
 
+    if (progress_addr) {
+      *progress_addr = addr;
+      break;
+    }
     #define LD_THRESHOLD (8*1024)
     if (count >= LD_THRESHOLD) {
       if (count == LD_THRESHOLD) {
