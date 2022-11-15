@@ -240,7 +240,7 @@ void plat_init(void)
   }
 
   in_menu = 1;
-  SDL_WM_SetCaption("PCSX-ReARMed " REV, NULL);
+  //SDL_WM_SetCaption("PCSX-ReARMed " REV, NULL);
 
   shadow_size = g_menuscreen_w * g_menuscreen_h * 2;
   // alloc enough for double res. rendering
@@ -2091,14 +2091,28 @@ void *plat_gvideo_flip(void)
           MIN(h_zoomed, RES_HW_SCREEN_VERTICAL));
       break;
       case ASPECT_RATIOS_TYPE_CROPPED:
+      if(plat_sdl_screen->w > 320){
       flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, hw_screen,
         MAX(320, RES_HW_SCREEN_HORIZONTAL), // DrUm78: width for 4:3 cropped mode
         RES_HW_SCREEN_VERTICAL);
+      }
+      else{
+      flip_NNOptimized_AllowOutOfScreen(plat_sdl_screen, hw_screen,
+        MAX(plat_sdl_screen->w*RES_HW_SCREEN_VERTICAL/plat_sdl_screen->h, RES_HW_SCREEN_HORIZONTAL),
+        RES_HW_SCREEN_VERTICAL);
+      }
       break;
       case ASPECT_RATIOS_TYPE_SCALED:
+      if(plat_sdl_screen->w > 320){
       flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
         RES_HW_SCREEN_HORIZONTAL,
         MIN(180, RES_HW_SCREEN_VERTICAL)); // DrUm78: height for 4:3 scaled mode
+      }
+      else{
+      flip_NNOptimized_LeftRightUpDownBilinear_Optimized8(plat_sdl_screen, hw_screen,
+        RES_HW_SCREEN_HORIZONTAL,
+        MIN(plat_sdl_screen->h*RES_HW_SCREEN_HORIZONTAL/plat_sdl_screen->w, RES_HW_SCREEN_VERTICAL));
+      }
       break;
       default:
       printf("Wrong aspect ratio value: %d\n", aspect_ratio);

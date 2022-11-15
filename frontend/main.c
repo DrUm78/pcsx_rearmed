@@ -699,7 +699,7 @@ int emu_core_preinit(void)
 
 int emu_core_init(void)
 {
-	SysPrintf("Starting PCSX-ReARMed " REV "\n");
+	//SysPrintf("Starting PCSX-ReARMed " REV "\n");
 
 #ifndef NO_FRONTEND
 	check_profile();
@@ -892,7 +892,7 @@ int main(int argc, char *argv[])
 		else if (!strcmp(argv[i], "-h") ||
 			 !strcmp(argv[i], "-help") ||
 			 !strcmp(argv[i], "--help")) {
-			 printf("PCSX-ReARMed " REV "\n");
+			 //printf("PCSX-ReARMed " REV "\n");
 			 printf("%s\n", _(
 							" pcsx [options] [file]\n"
 							"\toptions:\n"
