@@ -189,7 +189,7 @@ static void set_default_paths(void)
 	snprintf(Config.PatchesDir, sizeof(Config.PatchesDir), "." PATCHES_DIR);
 	MAKE_ABSOLUTE_PATH(Config.Mcd1, MEMCARD_DIR, "card1.mcd");
 	MAKE_ABSOLUTE_PATH(Config.Mcd2, MEMCARD_DIR, "card2.mcd");
-	strcpy(Config.BiosDir, "/mnt/PS1/bios");
+	strcpy(Config.BiosDir, "/mnt/FunKey/.pcsx/bios");
 #endif
 
 	strcpy(Config.PluginsDir, "plugins");
@@ -897,7 +897,7 @@ int main(int argc, char *argv[])
 							" pcsx [options] [file]\n"
 							"\toptions:\n"
 							"\t-cdfile FILE\tRuns a CD image file\n"
-							"\t-cfg FILE\tLoads desired configuration file (default: ~/.pcsx/pcsx.cfg)\n"
+							"\t-cfg FILE\tLoads desired configuration file (default: /mnt/FunKey/.pcsx/pcsx.cfg)\n"
 							"\t-psxout\t\tEnable PSX output\n"
 							"\t-load STATENUM\tLoads savestate STATENUM (1-5)\n"
 							"\t-loadf save_file\tLoads from save file\n"
@@ -1280,7 +1280,7 @@ static int _OpenPlugins(void) {
 		char path[MAXPATHLEN * 2];
 		char dotdir[MAXPATHLEN];
 
-		MAKE_ABSOLUTE_PATH(dotdir, "~/.pcsx/plugins/", NULL);
+		MAKE_ABSOLUTE_PATH(dotdir, "/mnt/FunKey/.pcsx/plugins/", NULL);
 
 		strcpy(info.EmuName, "PCSX");
 		memcpy(info.CdromID, CdromId, 9); /* no \0 trailing character? */

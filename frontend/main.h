@@ -21,16 +21,16 @@
 
 #include "config.h"
 
-#define DEFAULT_MEM_CARD_1 "/mnt/PS1/memcards/card1.mcd"
-#define DEFAULT_MEM_CARD_2 "/mnt/PS1/memcards/card2.mcd"
-#define MEMCARD_DIR "/mnt/PS1/memcards/"
-#define PLUGINS_DIR "~/.pcsx/plugins/"
-#define PLUGINS_CFG_DIR "~/.pcsx/plugins/cfg/"
-#define PCSX_DOT_DIR "~/.pcsx/"
-#define STATES_DIR "~/.pcsx/sstates/"
-#define CHEATS_DIR "~/.pcsx/cheats/"
-#define PATCHES_DIR "~/.pcsx/patches/"
-#define BIOS_DIR "/mnt/PS1/bios/"
+#define DEFAULT_MEM_CARD_1 "/mnt/FunKey/.pcsx/memcards/card1.mcd"
+#define DEFAULT_MEM_CARD_2 "/mnt/FunKey/.pcsx/memcards/card2.mcd"
+#define MEMCARD_DIR "/mnt/FunKey/.pcsx/memcards/"
+#define PLUGINS_DIR "/mnt/FunKey/.pcsx/plugins/"
+#define PLUGINS_CFG_DIR "/mnt/FunKey/.pcsx/plugins/cfg/"
+#define PCSX_DOT_DIR "/mnt/FunKey/.pcsx/"
+#define STATES_DIR "/mnt/FunKey/.pcsx/sstates/"
+#define CHEATS_DIR "/mnt/FunKey/.pcsx/cheats/"
+#define PATCHES_DIR "/mnt/FunKey/.pcsx/patches/"
+#define BIOS_DIR "/mnt/FunKey/.pcsx/bios/"
 
 extern char cfgfile_basename[MAXPATHLEN];
 

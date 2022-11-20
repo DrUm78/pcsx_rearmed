@@ -124,7 +124,7 @@ static const char *memcards[32];
 static int bios_sel, gpu_plugsel, spu_plugsel;
 
 #ifndef UI_FEATURES_H
-#define MENU_BIOS_PATH "/mnt/PS1/bios/"
+#define MENU_BIOS_PATH "/mnt/FunKey/.pcsx/bios/"
 #define MENU_SHOW_VARSCALER 0
 #define MENU_SHOW_VOUTMODE 1
 #define MENU_SHOW_SCALER2 0
@@ -3214,7 +3214,7 @@ static void menu_bios_warn(void)
 
     /** Set notif for BIOS */
     char shell_cmd[400];
-    sprintf(shell_cmd, "%s 0 \"     BIOS FILES MISSING^^While many games work fine ^with fake BIOS, others (like ^MGS and FF8) require BIOS to^work. Copy the BIOS^files in PS1/bios/^^BIOS file is called^: SCPH1001.BIN^File size is always 512KB^^For more instructions:^www.funkey-project.com^^Press any button to continue^^\"",
+    sprintf(shell_cmd, "%s 0 \"     BIOS FILES MISSING^^While many games work fine ^with fake BIOS, others (like ^MGS and FF8) require BIOS to^work. Copy the BIOS^files in FunKey/.pcsx/bios/^^BIOS file is called^: SCPH1001.BIN^File size is always 512KB^^For more instructions:^www.funkey-project.com^^Press any button to continue^^\"",
             SHELL_CMD_NOTIF_SET);
     system(shell_cmd);
 
