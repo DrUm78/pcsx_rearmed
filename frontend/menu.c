@@ -3214,7 +3214,7 @@ static void menu_bios_warn(void)
 
     /** Set notif for BIOS */
     char shell_cmd[400];
-    sprintf(shell_cmd, "%s 0 \"     BIOS FILES MISSING^^While many games work fine ^with fake BIOS, others (like ^MGS and FF8) require BIOS to^work. Copy the BIOS^files in FunKey/.pcsx/bios/^^BIOS file is called^: SCPH1001.BIN^File size is always 512KB^^For more instructions:^www.funkey-project.com^^Press any button to continue^^\"",
+    sprintf(shell_cmd, "%s 0 \"     BIOS FILE MISSING^^While many games work fine ^with fake BIOS, others (like ^MGS and FF8) require BIOS to^work. Copy the BIOS^file in FunKey/.pcsx/bios/^^BIOS file is called:^ SCPH1001.BIN^File size is always 512KB^^For more instructions:^www.funkey-project.com^^Press any button to continue^^\"",
             SHELL_CMD_NOTIF_SET);
     system(shell_cmd);
 
