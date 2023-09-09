@@ -1,12 +1,6 @@
 #include "new_dynarec.h"
 #include "../r3000a.h"
 
-extern char invalid_code[0x100000];
-
-/* weird stuff */
-#define EAX 0
-#define ECX 1
-
 extern int dynarec_local[];
 
 /* same as psxRegs.GPR.n.* */
@@ -14,11 +8,6 @@ extern int hi, lo;
 
 /* same as psxRegs.CP0.n.* */
 extern int reg_cop0[];
-#define Status   psxRegs.CP0.n.Status
-#define Cause    psxRegs.CP0.n.Cause
-#define EPC      psxRegs.CP0.n.EPC
-#define BadVAddr psxRegs.CP0.n.BadVAddr
-#define Count    psxRegs.cycle // psxRegs.CP0.n.Count
 
 /* COP2/GTE */
 enum gte_opcodes {
@@ -94,4 +83,3 @@ void pcsx_mtc0_ds(u32 reg, u32 val);
 /* misc */
 extern void SysPrintf(const char *fmt, ...);
 
-#define rdram ((u_char *)psxM)

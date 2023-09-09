@@ -9,12 +9,10 @@
 
 #include "emu_if.h"
 #include "pcsxmem.h"
+#include "events.h"
 #include "../psxhle.h"
 #include "../psxinterpreter.h"
 #include "../r3000a.h"
-#include "../cdrom.h"
-#include "../psxdma.h"
-#include "../mdec.h"
 #include "../gte_arm.h"
 #include "../gte_neon.h"
 #define FLAGLESS
@@ -25,92 +23,14 @@
 //#define evprintf printf
 #define evprintf(...)
 
-char invalid_code[0x100000];
-u32 event_cycles[PSXINT_COUNT];
-
-static void schedule_timeslice(void)
-{
-	u32 i, c = psxRegs.cycle;
-	u32 irqs = psxRegs.interrupt;
-	s32 min, dif;
-
-	min = PSXCLK;
-	for (i = 0; irqs != 0; i++, irqs >>= 1) {
-		if (!(irqs & 1))
-			continue;
-		dif = event_cycles[i] - c;
-		//evprintf("  ev %d\n", dif);
-		if (0 < dif && dif < min)
-			min = dif;
-	}
-	next_interupt = c + min;
-}
-
-static void unusedInterrupt()
-{
-}
-
-typedef void (irq_func)();
-
-static irq_func * const irq_funcs[] = {
-	[PSXINT_SIO]	= sioInterrupt,
-	[PSXINT_CDR]	= cdrInterrupt,
-	[PSXINT_CDREAD]	= cdrPlayReadInterrupt,
-	[PSXINT_GPUDMA]	= gpuInterrupt,
-	[PSXINT_MDECOUTDMA] = mdec1Interrupt,
-	[PSXINT_SPUDMA]	= spuInterrupt,
-	[PSXINT_MDECINDMA] = mdec0Interrupt,
-	[PSXINT_GPUOTCDMA] = gpuotcInterrupt,
-	[PSXINT_CDRDMA] = cdrDmaInterrupt,
-	[PSXINT_CDRLID] = cdrLidSeekInterrupt,
-	[PSXINT_CDRPLAY_OLD] = unusedInterrupt,
-	[PSXINT_SPU_UPDATE] = spuUpdate,
-	[PSXINT_RCNT] = psxRcntUpdate,
-};
-
-/* local dupe of psxBranchTest, using event_cycles */
-static void irq_test(void)
-{
-	u32 cycle = psxRegs.cycle;
-	u32 irq, irq_bits;
-
-	for (irq = 0, irq_bits = psxRegs.interrupt; irq_bits != 0; irq++, irq_bits >>= 1) {
-		if (!(irq_bits & 1))
-			continue;
-		if ((s32)(cycle - event_cycles[irq]) >= 0) {
-			// note: irq_funcs() also modify psxRegs.interrupt
-			psxRegs.interrupt &= ~(1u << irq);
-			irq_funcs[irq]();
-		}
-	}
-
-	if ((psxHu32(0x1070) & psxHu32(0x1074)) && (Status & 0x401) == 0x401) {
-		psxException(0x400, 0);
-		pending_exception = 1;
-	}
-}
-
-void gen_interupt()
-{
-	evprintf("  +ge %08x, %u->%u (%d)\n", psxRegs.pc, psxRegs.cycle,
-		next_interupt, next_interupt - psxRegs.cycle);
-
-	irq_test();
-	//psxBranchTest();
-	//pending_exception = 1;
-
-	schedule_timeslice();
-
-	evprintf("  -ge %08x, %u->%u (%d)\n", psxRegs.pc, psxRegs.cycle,
-		next_interupt, next_interupt - psxRegs.cycle);
-}
-
 void pcsx_mtc0(u32 reg, u32 val)
 {
 	evprintf("MTC0 %d #%x @%08x %u\n", reg, val, psxRegs.pc, psxRegs.cycle);
 	MTC0(&psxRegs, reg, val);
-	gen_interupt();
-	if (Cause & Status & 0x0300) // possible sw irq
+	gen_interupt(&psxRegs.CP0);
+
+	//if (psxRegs.CP0.n.Cause & psxRegs.CP0.n.SR & 0x0300) // possible sw irq
+	if ((psxRegs.pc & 0x803ffeff) == 0x80000080)
 		pending_exception = 1;
 }
 
@@ -118,18 +38,6 @@ void pcsx_mtc0_ds(u32 reg, u32 val)
 {
 	evprintf("MTC0 %d #%x @%08x %u\n", reg, val, psxRegs.pc, psxRegs.cycle);
 	MTC0(&psxRegs, reg, val);
-}
-
-void new_dyna_before_save(void)
-{
-	psxRegs.interrupt &= ~(1 << PSXINT_RCNT); // old savestate compat
-
-	// psxRegs.intCycle is always maintained, no need to convert
-}
-
-void new_dyna_after_save(void)
-{
-	psxRegs.interrupt |= 1 << PSXINT_RCNT;
 }
 
 static void new_dyna_restore(void)
@@ -330,7 +238,6 @@ static int ari64_init()
 
 static void ari64_reset()
 {
-	printf("ari64_reset\n");
 	new_dyna_pcsx_mem_reset();
 	new_dynarec_invalidate_all_pages();
 	new_dyna_restore();
@@ -341,8 +248,6 @@ static void ari64_reset()
 // (HLE softcall exit and BIOS fastboot end)
 static void ari64_execute_until()
 {
-	schedule_timeslice();
-
 	evprintf("ari64_execute %08x, %u->%u (%d)\n", psxRegs.pc,
 		psxRegs.cycle, next_interupt, next_interupt - psxRegs.cycle);
 
@@ -355,9 +260,22 @@ static void ari64_execute_until()
 static void ari64_execute()
 {
 	while (!stop) {
+		schedule_timeslice();
 		ari64_execute_until();
 		evprintf("drc left @%08x\n", psxRegs.pc);
 	}
+}
+
+static void ari64_execute_block(enum blockExecCaller caller)
+{
+	if (caller == EXEC_CALLER_BOOT)
+		stop++;
+
+	next_interupt = psxRegs.cycle + 1;
+	ari64_execute_until();
+
+	if (caller == EXEC_CALLER_BOOT)
+		stop--;
 }
 
 static void ari64_clear(u32 addr, u32 size)
@@ -369,20 +287,21 @@ static void ari64_clear(u32 addr, u32 size)
 	new_dynarec_invalidate_range(addr, addr + size);
 }
 
-static void ari64_notify(int note, void *data) {
-	/*
-	Should be fixed when ARM dynarec has proper icache emulation.
+static void ari64_notify(enum R3000Anote note, void *data) {
 	switch (note)
 	{
-		case R3000ACPU_NOTIFY_CACHE_UNISOLATED:
-			break;
-		case R3000ACPU_NOTIFY_CACHE_ISOLATED:
-		Sent from psxDma3().
-		case R3000ACPU_NOTIFY_DMA3_EXE_LOAD:
-		default:
-			break;
+	case R3000ACPU_NOTIFY_CACHE_UNISOLATED:
+	case R3000ACPU_NOTIFY_CACHE_ISOLATED:
+		new_dyna_pcsx_mem_isolate(note == R3000ACPU_NOTIFY_CACHE_ISOLATED);
+		break;
+	case R3000ACPU_NOTIFY_BEFORE_SAVE:
+		break;
+	case R3000ACPU_NOTIFY_AFTER_LOAD:
+		if (data == NULL)
+			ari64_reset();
+		psxInt.Notify(note, data);
+		break;
 	}
-	*/
 }
 
 static void ari64_apply_config()
@@ -411,7 +330,7 @@ R3000Acpu psxRec = {
 	ari64_init,
 	ari64_reset,
 	ari64_execute,
-	ari64_execute_until,
+	ari64_execute_block,
 	ari64_clear,
 	ari64_notify,
 	ari64_apply_config,
@@ -422,7 +341,7 @@ R3000Acpu psxRec = {
 
 unsigned int address;
 int pending_exception, stop;
-unsigned int next_interupt;
+u32 next_interupt;
 int new_dynarec_did_compile;
 int cycle_multiplier_old;
 int new_dynarec_hacks_pergame;
@@ -430,7 +349,7 @@ int new_dynarec_hacks_old;
 int new_dynarec_hacks;
 void *psxH_ptr;
 void *zeromem_ptr;
-u8 zero_mem[0x1000];
+u32 zero_mem[0x1000/4];
 void *mem_rtab;
 void *scratch_buf_ptr;
 void new_dynarec_init() {}
@@ -442,6 +361,7 @@ void new_dynarec_invalidate_range(unsigned int start, unsigned int end) {}
 void new_dyna_pcsx_mem_init(void) {}
 void new_dyna_pcsx_mem_reset(void) {}
 void new_dyna_pcsx_mem_load_state(void) {}
+void new_dyna_pcsx_mem_isolate(int enable) {}
 void new_dyna_pcsx_mem_shutdown(void) {}
 int  new_dynarec_save_blocks(void *save, int size) { return 0; }
 void new_dynarec_load_blocks(const void *save, int size) {}
@@ -595,7 +515,9 @@ void do_insn_cmp(void)
 	static u32 handler_cycle_intr;
 	u32 *allregs_p = (void *)&psxRegs;
 	u32 *allregs_e = (void *)&rregs;
+	u32 badregs_mask = 0;
 	static u32 ppc, failcount;
+	static u32 badregs_mask_prev;
 	int i, ret, bad = 0, fatal = 0, which_event = -1;
 	u32 ev_cycles = 0;
 	u8 code;
@@ -675,18 +597,24 @@ void do_insn_cmp(void)
 		if (allregs_p[i] != allregs_e[i]) {
 			miss_log_add(i, allregs_p[i], allregs_e[i], psxRegs.pc, psxRegs.cycle);
 			bad++;
-			if (i > 32+2)
+			if (i >= 32)
 				fatal = 1;
+			else
+				badregs_mask |= 1u << i;
 		}
 	}
 
-	if (!fatal && psxRegs.pc == rregs.pc && bad < 6 && failcount < 32) {
+	if (badregs_mask_prev & badregs_mask)
+		failcount++;
+	else
+		failcount = 0;
+
+	if (!fatal && psxRegs.pc == rregs.pc && bad < 6 && failcount < 24) {
 		static int last_mcycle;
 		if (last_mcycle != psxRegs.cycle >> 20) {
 			printf("%u\n", psxRegs.cycle);
 			last_mcycle = psxRegs.cycle >> 20;
 		}
-		failcount++;
 		goto ok;
 	}
 
@@ -705,6 +633,7 @@ void do_insn_cmp(void)
 ok:
 	//psxRegs.cycle = rregs.cycle + 2; // sync timing
 	ppc = psxRegs.pc;
+	badregs_mask_prev = badregs_mask;
 }
 
 #endif

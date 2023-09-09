@@ -163,6 +163,10 @@ void renderer_notify_res_change(void)
 {
 }
 
+void renderer_notify_scanout_x_change(int x, int w)
+{
+}
+
 extern const unsigned char cmd_lengths[256];
 
 int do_cmd_list(unsigned int *list, int list_len, int *last_cmd)
@@ -434,10 +438,10 @@ int do_cmd_list(unsigned int *list, int list_len, int *last_cmd)
           gpuDrawS(gpuSpriteSpanDrivers [Blending_Mode | TEXT_MODE | Masking | Blending | Lighting | (enableAbbeyHack<<7)  | PixelMSB]);
         break;
 
+#ifdef TEST
       case 0x80:          //  vid -> vid
         gpuMoveImage();   //  prim handles updateLace && skip
         break;
-#ifdef TEST
       case 0xA0:          //  sys -> vid
       {
         u32 load_width = list[2] & 0xffff;
@@ -450,8 +454,10 @@ int do_cmd_list(unsigned int *list, int list_len, int *last_cmd)
       case 0xC0:
         break;
 #else
-      case 0xA0:          //  sys ->vid
-      case 0xC0:          //  vid -> sys
+      case 0x80 ... 0x9F:          //  vid -> vid
+      case 0xA0 ... 0xBF:          //  sys -> vid
+      case 0xC0 ... 0xDF:          //  vid -> sys
+        // Handled by gpulib
         goto breakloop;
 #endif
       case 0xE1: {
@@ -520,7 +526,7 @@ void renderer_sync_ecmds(uint32_t *ecmds)
   do_cmd_list(&ecmds[1], 6, &dummy);
 }
 
-void renderer_update_caches(int x, int y, int w, int h)
+void renderer_update_caches(int x, int y, int w, int h, int state_changed)
 {
 }
 

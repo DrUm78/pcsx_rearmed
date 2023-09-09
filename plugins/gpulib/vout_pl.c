@@ -27,13 +27,14 @@ int vout_finish(void)
 
 static void check_mode_change(int force)
 {
-  static uint32_t old_status;
-  static int old_h;
   int w = gpu.screen.hres;
-  int h = gpu.screen.h;
+  int h = gpu.screen.vres;
   int w_out = w;
   int h_out = h;
 
+#ifdef RAW_FB_DISPLAY
+  w = w_out = 1024, h = h_out = 512;
+#endif
   gpu.state.enhancement_active =
     gpu.get_enhancement_bufer != NULL && gpu.state.enhancement_enable
     && w <= 512 && h <= 256 && !(gpu.status & PSX_GPU_STATUS_RGB24);
@@ -44,10 +45,12 @@ static void check_mode_change(int force)
   }
 
   // width|rgb24 change?
-  if (force || (gpu.status ^ old_status) & ((7<<16)|(1<<21)) || h != old_h)
+  if (force || (gpu.status ^ gpu.state.status_vo_old) & ((7<<16)|(1<<21))
+      || w_out != gpu.state.w_out_old || h_out != gpu.state.h_out_old)
   {
-    old_status = gpu.status;
-    old_h = h;
+    gpu.state.status_vo_old = gpu.status;
+    gpu.state.w_out_old = w_out;
+    gpu.state.h_out_old = h_out;
 
     cbs->pl_vout_set_mode(w_out, h_out, w, h,
           (gpu.status & PSX_GPU_STATUS_RGB24) ? 24 : 16);
@@ -56,50 +59,68 @@ static void check_mode_change(int force)
 
 void vout_update(void)
 {
+  int bpp = (gpu.status & PSX_GPU_STATUS_RGB24) ? 24 : 16;
+  uint8_t *vram = (uint8_t *)gpu.vram;
+  int src_x = gpu.screen.src_x;
+  int src_y = gpu.screen.src_y;
   int x = gpu.screen.x;
   int y = gpu.screen.y;
   int w = gpu.screen.w;
   int h = gpu.screen.h;
-  uint16_t *vram = gpu.vram;
   int vram_h = 512;
+  int src_x2 = 0;
 
-  if (w == 0 || h == 0)
+#ifdef RAW_FB_DISPLAY
+  w = 1024, h = 512, x = src_x = y = src_y = 0;
+#endif
+  if (x < 0) { w += x; src_x2 = -x; x = 0; }
+  if (y < 0) { h += y; src_y -=  y; y = 0; }
+
+  if (w <= 0 || h <= 0)
     return;
 
   check_mode_change(0);
-  if (gpu.state.enhancement_active)
-    vram = gpu.get_enhancement_bufer(&x, &y, &w, &h, &vram_h);
+  if (gpu.state.enhancement_active) {
+    if (!gpu.state.enhancement_was_active)
+      return; // buffer not ready yet
+    vram = gpu.get_enhancement_bufer(&src_x, &src_y, &w, &h, &vram_h);
+    x *= 2; y *= 2;
+    src_x2 *= 2;
+  }
 
-  if (y + h > vram_h) {
-    if (y + h - vram_h > h / 2) {
+  if (src_y + h > vram_h) {
+    if (src_y + h - vram_h > h / 2) {
       // wrap
-      h -= vram_h - y;
-      y = 0;
+      h -= vram_h - src_y;
+      src_y = 0;
     }
     else
       // clip
-      h = vram_h - y;
+      h = vram_h - src_y;
   }
 
-  vram += y * 1024 + x;
+  vram += (src_y * 1024 + src_x) * 2;
+  vram += src_x2 * bpp / 8;
 
-  cbs->pl_vout_flip(vram, 1024, !!(gpu.status & PSX_GPU_STATUS_RGB24), w, h);
+  cbs->pl_vout_flip(vram, 1024, !!(gpu.status & PSX_GPU_STATUS_RGB24),
+      x, y, w, h, gpu.state.dims_changed);
+  gpu.state.dims_changed = 0;
 }
 
 void vout_blank(void)
 {
   int w = gpu.screen.hres;
-  int h = gpu.screen.h;
+  int h = gpu.screen.vres;
 
   check_mode_change(0);
   if (gpu.state.enhancement_active) {
     w *= 2;
     h *= 2;
   }
-  cbs->pl_vout_flip(NULL, 1024, !!(gpu.status & PSX_GPU_STATUS_RGB24), w, h);
+  cbs->pl_vout_flip(NULL, 1024, !!(gpu.status & PSX_GPU_STATUS_RGB24), 0, 0, w, h, 0);
 }
 
-long GPUopen(void **unused)
+long GPUopen(unsigned long *disp, char *cap, char *cfg)
 {
   gpu.frameskip.active = 0;
   gpu.frameskip.frame_ready = 1;

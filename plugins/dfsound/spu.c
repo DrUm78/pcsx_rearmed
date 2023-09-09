@@ -18,10 +18,6 @@
  *                                                                         *
  ***************************************************************************/
 
-#if !defined(_WIN32) && !defined(NO_OS)
-#include <sys/time.h> // gettimeofday in xa.c
-#define THREAD_ENABLED 1
-#endif
 #include "stdafx.h"
 
 #define _IN_SPU
@@ -212,13 +208,24 @@ static void do_irq(void)
 
 static int check_irq(int ch, unsigned char *pos)
 {
- if((spu.spuCtrl & CTRL_IRQ) && pos == spu.pSpuIrq)
+ if((spu.spuCtrl & (CTRL_ON|CTRL_IRQ)) == (CTRL_ON|CTRL_IRQ) && pos == spu.pSpuIrq)
  {
   //printf("ch%d irq %04x\n", ch, pos - spu.spuMemC);
   do_irq();
   return 1;
  }
  return 0;
+}
+
+void check_irq_io(unsigned int addr)
+{
+ unsigned int irq_addr = regAreaGet(H_SPUirqAddr) << 3;
+ //addr &= ~7; // ?
+ if((spu.spuCtrl & (CTRL_ON|CTRL_IRQ)) == (CTRL_ON|CTRL_IRQ) && addr == irq_addr)
+ {
+  //printf("io   irq %04x\n", irq_addr);
+  do_irq();
+ }
 }
 
 ////////////////////////////////////////////////////////////////////////
@@ -275,9 +282,8 @@ INLINE int FModChangeFrequency(int *SB, int pitch, int ns)
  if(NP<0x1)    NP=0x1;
 
  sinc=NP<<4;                                           // calc frequency
- if(spu_config.iUseInterpolation==1)                   // freq change in simple interpolation mode
-  SB[32]=1;
  iFMod[ns]=0;
+ SB[32]=1;                                             // reset interpolation
 
  return sinc;
 }                    
@@ -487,6 +493,8 @@ static void scan_for_irq(int ch, unsigned int *upd_samples)
  pos = s_chan->spos;
  sinc = s_chan->sinc;
  end = pos + *upd_samples * sinc;
+ if (s_chan->prevflags & 1)                 // 1: stop/loop
+  block = s_chan->pLoop;
 
  pos += (28 - s_chan->iSBPos) << 16;
  while (pos < end)
@@ -769,6 +777,9 @@ static void do_channels(int ns_to)
    s_chan = &spu.s_chan[ch];
    SB = spu.SB + ch * SB_SIZE;
    sinc = s_chan->sinc;
+   if (spu.s_chan[ch].bNewPitch)
+    SB[32] = 1;                                    // reset interpolation
+   spu.s_chan[ch].bNewPitch = 0;
 
    if (s_chan->bNoise)
     d = do_samples_noise(ch, ns_to);
@@ -805,6 +816,8 @@ static void do_channels(int ns_to)
     mix_chan(spu.SSumLR, ns_to, s_chan->iLeftVolume, s_chan->iRightVolume);
   }
 
+  MixXA(spu.SSumLR, RVB, ns_to, spu.decode_pos);
+
   if (spu.rvb->StartAddr) {
    if (do_rvb)
     REVERBDo(spu.SSumLR, RVB, ns_to, spu.rvb->CurrAddr);
@@ -820,7 +833,7 @@ static void do_samples_finish(int *SSumLR, int ns_to,
 
 // optional worker thread handling
 
-#if defined(THREAD_ENABLED) || defined(WANT_THREAD_CODE)
+#if P_HAVE_PTHREAD || defined(WANT_THREAD_CODE)
 
 // worker thread state
 static struct spu_worker {
@@ -857,11 +870,14 @@ static struct spu_worker {
    int sinc;
    int start;
    int loop;
-   int ns_to;
    short vol_l;
    short vol_r;
+   unsigned short ns_to;
+   unsigned short bNoise:1;
+   unsigned short bFMod:2;
+   unsigned short bRVBActive:1;
+   unsigned short bNewPitch:1;
    ADSRInfoEx adsr;
-   // might also want to add fmod flags..
   } ch[24];
   int SSumLR[NSSIZE * 2];
  } i[4];
@@ -939,6 +955,10 @@ static void queue_channel_work(int ns_to, unsigned int silentch)
    work->ch[ch].vol_r = s_chan->iRightVolume;
    work->ch[ch].start = s_chan->pCurr - spu.spuMemC;
    work->ch[ch].loop = s_chan->pLoop - spu.spuMemC;
+   work->ch[ch].bNoise = s_chan->bNoise;
+   work->ch[ch].bFMod = s_chan->bFMod;
+   work->ch[ch].bRVBActive = s_chan->bRVBActive;
+   work->ch[ch].bNewPitch = s_chan->bNewPitch;
    if (s_chan->prevflags & 1)
     work->ch[ch].start = work->ch[ch].loop;
 
@@ -952,6 +972,7 @@ static void queue_channel_work(int ns_to, unsigned int silentch)
     s_chan->ADSRX.State = ADSR_RELEASE;
     s_chan->ADSRX.EnvelopeVol = 0;
    }
+   s_chan->bNewPitch = 0;
   }
 
  work->rvb_addr = 0;
@@ -971,8 +992,6 @@ static void queue_channel_work(int ns_to, unsigned int silentch)
 static void do_channel_work(struct work_item *work)
 {
  unsigned int mask;
- unsigned int decode_dirty_ch = 0;
- const SPUCHAN *s_chan;
  int *SB, sinc, spos, sbpos;
  int d, ch, ns_to;
 
@@ -997,15 +1016,16 @@ static void do_channel_work(struct work_item *work)
    sbpos = work->ch[ch].sbpos;
    sinc = work->ch[ch].sinc;
 
-   s_chan = &spu.s_chan[ch];
    SB = spu.SB + ch * SB_SIZE;
+   if (work->ch[ch].bNewPitch)
+    SB[32] = 1; // reset interpolation
 
-   if (s_chan->bNoise)
+   if (work->ch[ch].bNoise)
     do_lsfr_samples(d, work->ctrl, &spu.dwNoiseCount, &spu.dwNoiseVal);
-   else if (s_chan->bFMod == 2
-         || (s_chan->bFMod == 0 && spu_config.iUseInterpolation == 0))
+   else if (work->ch[ch].bFMod == 2
+         || (work->ch[ch].bFMod == 0 && spu_config.iUseInterpolation == 0))
     do_samples_noint(decode_block_work, work, ch, d, SB, sinc, &spos, &sbpos);
-   else if (s_chan->bFMod == 0 && spu_config.iUseInterpolation == 1)
+   else if (work->ch[ch].bFMod == 0 && spu_config.iUseInterpolation == 1)
     do_samples_simple(decode_block_work, work, ch, d, SB, sinc, &spos, &sbpos);
    else
     do_samples_default(decode_block_work, work, ch, d, SB, sinc, &spos, &sbpos);
@@ -1017,14 +1037,11 @@ static void do_channel_work(struct work_item *work)
    }
 
    if (ch == 1 || ch == 3)
-    {
-     do_decode_bufs(spu.spuMem, ch/2, ns_to, work->decode_pos);
-     decode_dirty_ch |= 1 << ch;
-    }
+    do_decode_bufs(spu.spuMem, ch/2, ns_to, work->decode_pos);
 
-   if (s_chan->bFMod == 2)                         // fmod freq channel
+   if (work->ch[ch].bFMod == 2)                         // fmod freq channel
     memcpy(iFMod, &ChanBuf, ns_to * sizeof(iFMod[0]));
-   if (s_chan->bRVBActive && work->rvb_addr)
+   if (work->ch[ch].bRVBActive && work->rvb_addr)
     mix_chan_rvb(work->SSumLR, ns_to,
       work->ch[ch].vol_l, work->ch[ch].vol_r, RVB);
    else
@@ -1053,6 +1070,7 @@ static void sync_worker_thread(int force)
   work = &worker->i[worker->i_reaped & WORK_I_MASK];
   thread_work_wait_sync(work, force);
 
+  MixXA(work->SSumLR, RVB, work->ns_to, work->decode_pos);
   do_samples_finish(work->SSumLR, work->ns_to,
    work->channels_silent, work->decode_pos);
 
@@ -1071,7 +1089,7 @@ static void sync_worker_thread(int force) {}
 
 static const void * const worker = NULL;
 
-#endif // THREAD_ENABLED
+#endif // P_HAVE_PTHREAD || defined(WANT_THREAD_CODE)
 
 ////////////////////////////////////////////////////////////////////////
 // MAIN SPU FUNCTION
@@ -1136,6 +1154,10 @@ void do_samples(unsigned int cycles_to, int do_direct)
       do_irq();
      }
    }
+  if (!spu.cycles_dma_end || (int)(spu.cycles_dma_end - cycles_to) < 0) {
+   spu.cycles_dma_end = 0;
+   check_irq_io(spu.spuAddr);
+  }
 
   if (unlikely(spu.rvb->dirty))
    REVERBPrep();
@@ -1146,6 +1168,7 @@ void do_samples(unsigned int cycles_to, int do_direct)
   }
   else {
    queue_channel_work(ns_to, silentch);
+   //sync_worker_thread(1); // uncomment for debug
   }
 
   // advance "stopped" channels that can cause irqs
@@ -1177,12 +1200,10 @@ static void do_samples_finish(int *SSumLR, int ns_to,
     spu.decode_dirty_ch &= ~(1<<3);
    }
 
-  MixXA(SSumLR, ns_to, decode_pos);
-
   vol_l = vol_l * spu_config.iVolume >> 10;
   vol_r = vol_r * spu_config.iVolume >> 10;
 
-  if (!(spu.spuCtrl & 0x4000) || !(vol_l | vol_r))
+  if (!(spu.spuCtrl & CTRL_MUTE) || !(vol_l | vol_r))
    {
     // muted? (rare)
     memset(spu.pS, 0, ns_to * 2 * sizeof(spu.pS[0]));
@@ -1350,7 +1371,7 @@ static void RemoveStreams(void)
 /* special code for TI C64x DSP */
 #include "spu_c64x.c"
 
-#elif defined(THREAD_ENABLED)
+#elif P_HAVE_PTHREAD
 
 #include <pthread.h>
 #include <semaphore.h>
@@ -1449,7 +1470,7 @@ static void exit_spu_thread(void)
  worker = NULL;
 }
 
-#else // if !THREAD_ENABLED
+#else // if !P_HAVE_PTHREAD
 
 static void init_spu_thread(void)
 {
@@ -1466,6 +1487,7 @@ long CALLBACK SPUinit(void)
 {
  int i;
 
+ memset(&spu, 0, sizeof(spu));
  spu.spuMemC = calloc(1, 512 * 1024);
  InitADSR();
 
@@ -1542,33 +1564,6 @@ long CALLBACK SPUshutdown(void)
  spu.bSpuInit=0;
 
  return 0;
-}
-
-// SPUTEST: we don't test, we are always fine ;)
-long CALLBACK SPUtest(void)
-{
- return 0;
-}
-
-// SPUCONFIGURE: call config dialog
-long CALLBACK SPUconfigure(void)
-{
-#ifdef _MACOSX
- DoConfiguration();
-#else
-// StartCfgTool("CFG");
-#endif
- return 0;
-}
-
-// SPUABOUT: show about window
-void CALLBACK SPUabout(void)
-{
-#ifdef _MACOSX
- DoAbout();
-#else
-// StartCfgTool("ABOUT");
-#endif
 }
 
 // SETUP CALLBACKS

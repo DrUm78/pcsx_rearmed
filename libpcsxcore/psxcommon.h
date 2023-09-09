@@ -145,6 +145,7 @@ typedef struct {
 	boolean UseNet;
 	boolean icache_emulation;
 	boolean DisableStalls;
+	boolean PreciseExceptions;
 	int GpuListWalking;
 	int cycle_multiplier; // 100 for 1.0
 	int cycle_multiplier_override;
@@ -154,9 +155,6 @@ typedef struct {
 		boolean cdr_read_timing;
 		boolean gpu_slow_list_walking;
 	} hacks;
-#ifdef _WIN32
-	char Lang[256];
-#endif
 } PcsxConfig;
 
 extern PcsxConfig Config;

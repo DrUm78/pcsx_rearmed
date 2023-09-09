@@ -59,6 +59,9 @@ cycle_multiplier_overrides[] =
 	 * changing memcard settings is enough to break/unbreak it */
 	{ "SLPS02528", 190 },
 	{ "SLPS02636", 190 },
+	/* Brave Fencer Musashi - cd sectors arrive too fast */
+	{ "SLUS00726", 170 },
+	{ "SLPS01490", 170 },
 #if defined(DRC_DISABLE) || defined(LIGHTREC) /* new_dynarec has a hack for this game */
 	/* Parasite Eve II - internal timer checks */
 	{ "SLUS01042", 125 },
@@ -66,6 +69,10 @@ cycle_multiplier_overrides[] =
 	{ "SLES02558", 125 },
 	{ "SLES12558", 125 },
 #endif
+	/* Discworld Noir - audio skips if CPU runs too fast */
+	{ "SLES01549", 222 },
+	{ "SLES02063", 222 },
+	{ "SLES02064", 222 },
 };
 
 /* Function for automatic patching according to GameID. */

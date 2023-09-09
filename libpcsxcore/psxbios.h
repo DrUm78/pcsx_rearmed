@@ -38,12 +38,12 @@ void psxBiosInit();
 void psxBiosShutdown();
 void psxBiosException();
 void psxBiosFreeze(int Mode);
+void psxBiosCnfLoaded(u32 tcb_cnt, u32 evcb_cnt, u32 sp);
+void psxBiosSetupBootState(void);
 
 extern void (*biosA0[256])();
-extern void (*biosB0[256])();
-extern void (*biosC0[256])();
-
-extern boolean hleSoftCall;
+extern void (**biosB0)();
+extern void (*biosC0[256+128])();
 
 #ifdef __cplusplus
 }

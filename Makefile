@@ -6,6 +6,9 @@ CFLAGS += -Wall -ggdb -Iinclude -ffast-math
 ifndef DEBUG
 CFLAGS += -O2 -DNDEBUG
 endif
+CFLAGS += -DP_HAVE_MMAP=$(if $(NO_MMAP),0,1) \
+	  -DP_HAVE_PTHREAD=$(if $(NO_PTHREAD),0,1) \
+	  -DP_HAVE_POSIX_MEMALIGN=$(if $(NO_POSIX_MEMALIGN),0,1)
 CXXFLAGS += $(CFLAGS)
 #DRC_DBG = 1
 #PCNT = 1
@@ -71,7 +74,7 @@ OBJS += libpcsxcore/new_dynarec/pcsxmem.o
 else
 CFLAGS += -DDRC_DISABLE
 endif
-OBJS += libpcsxcore/new_dynarec/emu_if.o
+OBJS += libpcsxcore/new_dynarec/emu_if.o libpcsxcore/new_dynarec/events.o
 libpcsxcore/new_dynarec/new_dynarec.o: libpcsxcore/new_dynarec/pcsxmem_inline.c
 ifdef DRC_DBG
 libpcsxcore/new_dynarec/emu_if.o: CFLAGS += -D_FILE_OFFSET_BITS=64

@@ -94,10 +94,12 @@ typedef enum
 	MA_OPT_VOUT_MODE,
 	MA_OPT_SCANLINES,
 	MA_OPT_SCANLINE_LEVEL,
+	MA_OPT_CENTERING,
 } menu_id;
 
 static int last_vout_w, last_vout_h, last_vout_bpp;
-static int cpu_clock, cpu_clock_st, volume_boost, frameskip;
+static int cpu_clock, cpu_clock_st, volume_boost;
+static int frameskip = 1; // 0 - auto, 1 - off
 static char last_selected_fname[MAXPATHLEN];
 static int config_save_counter, region, in_type_sel1, in_type_sel2;
 static int psx_clock;
@@ -117,7 +119,7 @@ int soft_filter;
 #define DEFAULT_PSX_CLOCK_S "50"
 #endif
 
-static const char *bioses[24];
+static const char *bioses[32];
 static const char *gpu_plugins[16];
 static const char *spu_plugins[16];
 static const char *memcards[32];
@@ -1592,8 +1594,7 @@ static void menu_set_defconfig(void)
 	g_scaler = SCALE_4_3;
 	g_gamma = 100;
 	volume_boost = 0;
-	frameskip = 0;
-	//frameskip = 1;
+	frameskip = 1; // 1 - off
 	analog_deadzone = 50;
 	soft_scaling = 1;
 	soft_filter = 0;
@@ -1655,6 +1656,7 @@ static const struct {
 	CE_CONFIG_VAL(DisableStalls),
 	CE_CONFIG_VAL(Cpu),
 	CE_CONFIG_VAL(GpuListWalking),
+	CE_CONFIG_VAL(PreciseExceptions),
 	CE_INTVAL(region),
 	CE_INTVAL_V(g_scaler, 3),
 	CE_INTVAL(g_gamma),
@@ -1679,7 +1681,7 @@ static const struct {
 	CE_INTVAL(g_autostateld_opt),
 	CE_INTVAL_N("adev0_is_nublike", in_adev_is_nublike[0]),
 	CE_INTVAL_N("adev1_is_nublike", in_adev_is_nublike[1]),
-	CE_INTVAL_V(frameskip, 3),
+	CE_INTVAL_V(frameskip, 4),
 	CE_INTVAL_P(gpu_peops.iUseDither),
 	CE_INTVAL_P(gpu_peops.dwActFixes),
 	CE_INTVAL_P(gpu_unai.lineskip),
@@ -1706,6 +1708,9 @@ static const struct {
 	CE_INTVAL_P(gpu_peopsgl.iVRamSize),
 	CE_INTVAL_P(gpu_peopsgl.iTexGarbageCollection),
 	CE_INTVAL_P(gpu_peopsgl.dwActFixes),
+	CE_INTVAL_P(screen_centering_type),
+	CE_INTVAL_P(screen_centering_x),
+	CE_INTVAL_P(screen_centering_y),
 	CE_INTVAL(spu_config.iUseReverb),
 	CE_INTVAL(spu_config.iXAPitch),
 	CE_INTVAL(spu_config.iUseInterpolation),
@@ -2516,6 +2521,7 @@ static const char *men_soft_filter[] = { "None",
 #endif
 	NULL };
 static const char *men_dummy[] = { NULL };
+static const char *men_centering[] = { "Auto", "Ingame", "Force", NULL };
 static const char h_scaler[]    = "int. 2x  - scales w. or h. 2x if it fits on screen\n"
 				  "int. 4:3 - uses integer if possible, else fractional";
 static const char h_cscaler[]   = "Displays the scaler layer, you can resize it\n"
@@ -2580,6 +2586,7 @@ static int menu_loop_cscaler(int id, int keys)
 
 static menu_entry e_menu_gfx_options[] =
 {
+	mee_enum      ("Screen centering",         MA_OPT_CENTERING, pl_rearmed_cbs.screen_centering_type, men_centering),
 	mee_enum_h    ("Scaler",                   MA_OPT_VARSCALER, g_scaler, men_scaler, h_scaler),
 	mee_enum      ("Video output mode",        MA_OPT_VOUT_MODE, plat_target.vout_method, men_dummy),
 	mee_onoff     ("Software Scaling",         MA_OPT_SCALER2, soft_scaling, 1),
@@ -2620,7 +2627,7 @@ static const char *men_gpu_interlace[] = { "Off", "On", "Auto", NULL };
 static menu_entry e_menu_plugin_gpu_neon[] =
 {
 	mee_enum      ("Enable interlace mode",      0, pl_rearmed_cbs.gpu_neon.allow_interlace, men_gpu_interlace),
-	mee_onoff_h   ("Enhanced resolution (slow)", 0, pl_rearmed_cbs.gpu_neon.enhancement_enable, 1, h_gpu_neon_enhanced),
+	mee_onoff_h   ("Enhanced resolution",        0, pl_rearmed_cbs.gpu_neon.enhancement_enable, 1, h_gpu_neon_enhanced),
 	mee_onoff_h   ("Enhanced res. speed hack",   0, pl_rearmed_cbs.gpu_neon.enhancement_no_main, 1, h_gpu_neon_enhanced_hack),
 	mee_end,
 };
@@ -2859,12 +2866,14 @@ static const char h_cfg_nodrc[]  = "Disable dynamic recompiler and use interpret
 #endif
 static const char h_cfg_shacks[] = "Breaks games but may give better performance";
 static const char h_cfg_icache[] = "Support F1 games (only when dynarec is off)";
-static const char h_cfg_gpul[]   = "Try enabling this if the game is missing some graphics\n"
+static const char h_cfg_exc[]    = "Emulate some PSX's debug hw like breakpoints\n"
+				   "and exceptions (slow, interpreter only, keep off)";
+static const char h_cfg_gpul[]   = "Try enabling this if the game misses some graphics\n"
 				   "causes a performance hit";
 static const char h_cfg_psxclk[]  = "Over/under-clock the PSX, default is " DEFAULT_PSX_CLOCK_S "\n"
 				    "(adjust this if the game is too slow/too fast/hangs)";
 
-enum { AMO_XA, AMO_CDDA, AMO_IC, AMO_CPU, AMO_GPUL };
+enum { AMO_XA, AMO_CDDA, AMO_IC, AMO_BP, AMO_CPU, AMO_GPUL };
 
 static menu_entry e_menu_adv_options[] =
 {
@@ -2874,6 +2883,7 @@ static menu_entry e_menu_adv_options[] =
 	mee_onoff_h   ("Disable XA Decoding",    0, menu_iopts[AMO_XA],   1, h_cfg_xa),
 	mee_onoff_h   ("Disable CD Audio",       0, menu_iopts[AMO_CDDA], 1, h_cfg_cdda),
 	mee_onoff_h   ("ICache emulation",       0, menu_iopts[AMO_IC],   1, h_cfg_icache),
+	mee_onoff_h   ("BP exception emulation", 0, menu_iopts[AMO_BP],   1, h_cfg_exc),
 	mee_enum_h    ("GPU l-list slow walking",0, menu_iopts[AMO_GPUL], men_gpul, h_cfg_gpul),
 #if !defined(DRC_DISABLE) || defined(LIGHTREC)
 	mee_onoff_h   ("Disable dynarec (slow!)",0, menu_iopts[AMO_CPU],  1, h_cfg_nodrc),
@@ -2893,6 +2903,7 @@ static int menu_loop_adv_options(int id, int keys)
 		{ &Config.Xa,      &menu_iopts[AMO_XA] },
 		{ &Config.Cdda,    &menu_iopts[AMO_CDDA] },
 		{ &Config.icache_emulation, &menu_iopts[AMO_IC] },
+		{ &Config.PreciseExceptions, &menu_iopts[AMO_BP] },
 		{ &Config.Cpu,     &menu_iopts[AMO_CPU] },
 	};
 	int i;
@@ -3294,8 +3305,9 @@ static int reset_game(void)
 	ClosePlugins();
 	OpenPlugins();
 	SysReset();
-	if (CheckCdrom() != -1) {
-		LoadCdrom();
+	if (Config.HLE) {
+		if (LoadCdrom() == -1)
+			return -1;
 	}
 	return 0;
 }
@@ -3325,13 +3337,17 @@ static int reload_plugins(const char *cdimg)
 
 static int run_bios(void)
 {
+	boolean origSlowBoot = Config.SlowBoot;
+
 	if (bios_sel == 0)
 		return -1;
 
 	ready_to_go = 0;
 	if (reload_plugins(NULL) != 0)
 		return -1;
+	Config.SlowBoot = 1;
 	SysReset();
+	Config.SlowBoot = origSlowBoot;
 
 	ready_to_go = 1;
 	return 0;
@@ -3733,7 +3749,8 @@ static void scan_bios_plugins(void)
 			continue;
 
 		snprintf(fname, sizeof(fname), "%s/%s", Config.BiosDir, ent->d_name);
-		if (stat(fname, &st) != 0 || st.st_size != 512*1024) {
+		if (stat(fname, &st) != 0
+		    || (st.st_size != 512*1024 && st.st_size != 4*1024*1024)) {
 			printf("bad BIOS file: %s\n", ent->d_name);
 			continue;
 		}
@@ -3870,7 +3887,7 @@ void menu_init(void)
 
 	i = plat_target.cpu_clock_set != NULL
 		&& plat_target.cpu_clock_get != NULL && cpu_clock_st > 0;
-	me_enable(e_menu_gfx_options, MA_OPT_CPU_CLOCKS, i);
+	me_enable(e_menu_options, MA_OPT_CPU_CLOCKS, i);
 
 	i = me_id2offset(e_menu_gfx_options, MA_OPT_VOUT_MODE);
 	e_menu_gfx_options[i].data = plat_target.vout_methods;
@@ -3951,10 +3968,11 @@ void menu_prepare_emu(void)
 	psxCpu = &psxInt;
 	#endif
 	if (psxCpu != prev_cpu) {
+		prev_cpu->Notify(R3000ACPU_NOTIFY_BEFORE_SAVE, NULL);
 		prev_cpu->Shutdown();
 		psxCpu->Init();
-		// note that this does not really reset, just clears drc caches
 		psxCpu->Reset();
+		psxCpu->Notify(R3000ACPU_NOTIFY_AFTER_LOAD, NULL);
 	}
 
 	menu_sync_config();

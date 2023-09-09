@@ -29,19 +29,38 @@ extern "C" {
 #include "psxcounters.h"
 #include "psxbios.h"
 
-enum {
+enum R3000Aexception {
+	R3000E_Int = 0,      // Interrupt
+	R3000E_AdEL = 4,     // Address error (on load/I-fetch)
+	R3000E_AdES = 5,     // Address error (on store)
+	R3000E_IBE = 6,      // Bus error (instruction fetch)
+	R3000E_DBE = 7,      // Bus error (data load/store)
+	R3000E_Syscall = 8,  // syscall instruction
+	R3000E_Bp = 9,       // Breakpoint - a break instruction
+	R3000E_RI = 10,      // reserved instruction
+	R3000E_CpU = 11,     // Co-Processor unusable
+	R3000E_Ov = 12       // arithmetic overflow
+};
+
+enum R3000Anote {
 	R3000ACPU_NOTIFY_CACHE_ISOLATED = 0,
 	R3000ACPU_NOTIFY_CACHE_UNISOLATED = 1,
-	R3000ACPU_NOTIFY_DMA3_EXE_LOAD = 2
+	R3000ACPU_NOTIFY_BEFORE_SAVE,  // data arg - hle if non-null
+	R3000ACPU_NOTIFY_AFTER_LOAD,
+};
+
+enum blockExecCaller {
+	EXEC_CALLER_BOOT,
+	EXEC_CALLER_HLE,
 };
 
 typedef struct {
 	int  (*Init)();
 	void (*Reset)();
-	void (*Execute)();		/* executes up to a break */
-	void (*ExecuteBlock)();	/* executes up to a jump */
+	void (*Execute)();
+	void (*ExecuteBlock)(enum blockExecCaller caller); /* executes up to a jump */
 	void (*Clear)(u32 Addr, u32 Size);
-	void (*Notify)(int note, void *data);
+	void (*Notify)(enum R3000Anote note, void *data);
 	void (*ApplyConfig)();
 	void (*Shutdown)();
 } R3000Acpu;
@@ -69,22 +88,19 @@ typedef union {
 		u32   r0, at, v0, v1, a0, a1, a2, a3,
 						t0, t1, t2, t3, t4, t5, t6, t7,
 						s0, s1, s2, s3, s4, s5, s6, s7,
-						t8, t9, k0, k1, gp, sp, s8, ra, lo, hi;
+						t8, t9, k0, k1, gp, sp, fp, ra, lo, hi;
 	} n;
 	u32 r[34]; /* Lo, Hi in r[32] and r[33] */
 	PAIR p[34];
 } psxGPRRegs;
 
-typedef union {
+typedef union psxCP0Regs_ {
 	struct {
-		u32	Index,     Random,    EntryLo0,  EntryLo1,
-						Context,   PageMask,  Wired,     Reserved0,
-						BadVAddr,  Count,     EntryHi,   Compare,
-						Status,    Cause,     EPC,       PRid,
-						Config,    LLAddr,    WatchLO,   WatchHI,
-						XContext,  Reserved1, Reserved2, Reserved3,
-						Reserved4, Reserved5, ECC,       CacheErr,
-						TagLo,     TagHi,     ErrorEPC,  Reserved6;
+		u32 Reserved0, Reserved1, Reserved2,  BPC,
+		    Reserved4, BDA,       Target,     DCIC,
+		    BadVAddr,  BDAM,      Reserved10, BPCM,
+		    SR,        Cause,     EPC,        PRid,
+		    Reserved16[16];
 	} n;
 	u32 r[32];
 	PAIR p[32];
@@ -164,9 +180,17 @@ enum {
 	PSXINT_NEWDRC_CHECK,
 	PSXINT_RCNT,
 	PSXINT_CDRLID,
-	PSXINT_CDRPLAY_OLD,	/* unused */
+	PSXINT_IRQ10,
 	PSXINT_SPU_UPDATE,
 	PSXINT_COUNT
+};
+
+enum R3000Abdt {
+	// corresponds to bits 31,30 of Cause reg
+	R3000A_BRANCH_TAKEN = 3,
+	R3000A_BRANCH_NOT_TAKEN = 2,
+	// none or tells that there was an exception in DS back to doBranch
+	R3000A_BRANCH_NONE_OR_EXCEPTION = 0,
 };
 
 typedef struct psxCP2Regs {
@@ -175,6 +199,8 @@ typedef struct psxCP2Regs {
 } psxCP2Regs;
 
 typedef struct {
+	// note: some cores like lightrec don't keep their data here,
+	// so use R3000ACPU_NOTIFY_BEFORE_SAVE to sync
 	psxGPRRegs GPR;		/* General Purpose Registers */
 	psxCP0Regs CP0;		/* Coprocessor0 Registers */
 	union {
@@ -184,15 +210,20 @@ typedef struct {
 		};
 		psxCP2Regs CP2;
 	};
-    u32 pc;				/* Program counter */
-    u32 code;			/* The instruction */
+	u32 pc;				/* Program counter */
+	u32 code;			/* The instruction */
 	u32 cycle;
 	u32 interrupt;
 	struct { u32 sCycle, cycle; } intCycle[32];
 	u32 gteBusyCycle;
 	u32 muldivBusyCycle;
-	u32 subCycle;		/* interpreter cycle counting */
+	u32 subCycle;       /* interpreter cycle counting */
 	u32 subCycleStep;
+	u32 biuReg;
+	u8  branching;      /* interp. R3000A_BRANCH_TAKEN / not, 0 if not branch */
+	u8  dloadSel;       /* interp. delay load state */
+	u8  dloadReg[2];
+	u32 dloadVal[2];
 	// warning: changing anything in psxRegisters requires update of all
 	// asm in libpcsxcore/new_dynarec/
 } psxRegisters;
@@ -203,8 +234,6 @@ extern psxRegisters psxRegs;
 extern u32 event_cycles[PSXINT_COUNT];
 extern u32 next_interupt;
 
-void new_dyna_before_save(void);
-void new_dyna_after_save(void);
 void new_dyna_freeze(void *f, int mode);
 
 #define new_dyna_set_event_abs(e, abs) { \
@@ -223,10 +252,13 @@ void new_dyna_freeze(void *f, int mode);
 int  psxInit();
 void psxReset();
 void psxShutdown();
-void psxException(u32 code, u32 bd);
+void psxException(u32 code, enum R3000Abdt bdt, psxCP0Regs *cp0);
 void psxBranchTest();
 void psxExecuteBios();
 void psxJumpTest();
+
+void irq10Interrupt();
+void psxScheduleIrq10(int irq_count, int x_cycles, int y);
 
 #ifdef __cplusplus
 }

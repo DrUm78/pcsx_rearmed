@@ -233,7 +233,8 @@ void emu_set_default_config(void)
 	spu_config.iXAPitch = 0;
 	spu_config.iVolume = 768;
 	spu_config.iTempo = 0;
-	spu_config.iUseThread = 1; // no effect if only 1 core is detected
+	// may cause issues, no effect if only 1 core is detected
+	spu_config.iUseThread = 0;
 #if defined(HAVE_PRE_ARMV7) && !defined(_3DS) /* XXX GPH hack */
 	spu_config.iUseReverb = 0;
 	spu_config.iUseInterpolation = 0;
@@ -722,7 +723,7 @@ int emu_core_init(void)
 
 void emu_core_ask_exit(void)
 {
-	stop = 1;
+	stop++;
 	g_emu_want_quit = 1;
 }
 
@@ -1068,8 +1069,8 @@ static void toggle_fast_forward(int force_off)
 {
 	static int fast_forward;
 	static int normal_g_opts;
-	static int normal_frameskip;
 	static int normal_enhancement_enable;
+	//static int normal_frameskip;
 
 	if (force_off && !fast_forward)
 		return;
@@ -1077,16 +1078,16 @@ static void toggle_fast_forward(int force_off)
 	fast_forward = !fast_forward;
 	if (fast_forward) {
 		normal_g_opts = g_opts;
-		normal_frameskip = pl_rearmed_cbs.frameskip;
+		//normal_frameskip = pl_rearmed_cbs.frameskip;
 		normal_enhancement_enable =
 			pl_rearmed_cbs.gpu_neon.enhancement_enable;
 
 		g_opts |= OPT_NO_FRAMELIM;
-		pl_rearmed_cbs.frameskip = 3;
+		// pl_rearmed_cbs.frameskip = 3; // too broken
 		pl_rearmed_cbs.gpu_neon.enhancement_enable = 0;
 	} else {
 		g_opts = normal_g_opts;
-		pl_rearmed_cbs.frameskip = normal_frameskip;
+		//pl_rearmed_cbs.frameskip = normal_frameskip;
 		pl_rearmed_cbs.gpu_neon.enhancement_enable =
 			normal_enhancement_enable;
 
@@ -1101,7 +1102,7 @@ static void toggle_fast_forward(int force_off)
 static void SignalExit(int sig) {
 	// only to restore framebuffer/resolution on some devices
 	plat_finish();
-	exit(1);
+	_exit(1);
 }
 #endif
 
@@ -1143,9 +1144,6 @@ void SysClose() {
 		fclose(emuLog);
 		emuLog = NULL;
 	}
-}
-
-void SysUpdate() {
 }
 
 int get_state_filename(char *buf, int size, int i) {
@@ -1258,8 +1256,6 @@ static int _OpenPlugins(void) {
 	signal(SIGINT, SignalExit);
 	signal(SIGPIPE, SignalExit);
 #endif
-
-	GPU_clearDynarec(clearDynarec);
 
 	ret = CDR_open();
 	if (ret < 0) { SysMessage(_("Error opening CD-ROM plugin!")); return -1; }

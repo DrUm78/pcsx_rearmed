@@ -48,7 +48,6 @@ GPUmakeSnapshot       GPU_makeSnapshot;
 GPUfreeze             GPU_freeze;
 GPUgetScreenPic       GPU_getScreenPic;
 GPUshowScreenPic      GPU_showScreenPic;
-GPUclearDynarec       GPU_clearDynarec;
 GPUvBlank             GPU_vBlank;
 
 CDRinit               CDR_init;
@@ -71,18 +70,12 @@ CDRsetfilename        CDR_setfilename;
 CDRreadCDDA           CDR_readCDDA;
 CDRgetTE              CDR_getTE;
 
-SPUconfigure          SPU_configure;
-SPUabout              SPU_about;
 SPUinit               SPU_init;
 SPUshutdown           SPU_shutdown;
-SPUtest               SPU_test;
 SPUopen               SPU_open;
 SPUclose              SPU_close;
-SPUplaySample         SPU_playSample;
 SPUwriteRegister      SPU_writeRegister;
 SPUreadRegister       SPU_readRegister;
-SPUwriteDMA           SPU_writeDMA;
-SPUreadDMA            SPU_readDMA;
 SPUwriteDMAMem        SPU_writeDMAMem;
 SPUreadDMAMem         SPU_readDMAMem;
 SPUplayADPCMchannel   SPU_playADPCMchannel;
@@ -200,7 +193,6 @@ void CALLBACK GPU__makeSnapshot(void) {}
 void CALLBACK GPU__keypressed(int key) {}
 long CALLBACK GPU__getScreenPic(unsigned char *pMem) { return -1; }
 long CALLBACK GPU__showScreenPic(unsigned char *pMem) { return -1; }
-void CALLBACK GPU__clearDynarec(void (CALLBACK *callback)(void)) {}
 void CALLBACK GPU__vBlank(int val) {}
 
 #define LoadGpuSym1(dest, name) \
@@ -240,7 +232,6 @@ static int LoadGPUplugin(const char *GPUdll) {
 	LoadGpuSym1(freeze, "GPUfreeze");
 	LoadGpuSym0(getScreenPic, "GPUgetScreenPic");
 	LoadGpuSym0(showScreenPic, "GPUshowScreenPic");
-	LoadGpuSym0(clearDynarec, "GPUclearDynarec");
     LoadGpuSym0(vBlank, "GPUvBlank");
 	LoadGpuSym0(configure, "GPUconfigure");
 	LoadGpuSym0(test, "GPUtest");
@@ -316,12 +307,8 @@ static int LoadCDRplugin(const char *CDRdll) {
 	return 0;
 }
 
-void *hSPUDriver = NULL;
-
-long CALLBACK SPU__configure(void) { return 0; }
-void CALLBACK SPU__about(void) {}
-long CALLBACK SPU__test(void) { return 0; }
-void CALLBACK SPU__registerScheduleCb(void (CALLBACK *cb)(unsigned int)) {}
+static void *hSPUDriver = NULL;
+static void CALLBACK SPU__registerScheduleCb(void (CALLBACK *cb)(unsigned int)) {}
 
 #define LoadSpuSym1(dest, name) \
 	LoadSym(SPU_##dest, SPU##dest, name, TRUE);
@@ -338,7 +325,6 @@ static int LoadSPUplugin(const char *SPUdll) {
 
 	hSPUDriver = SysLoadLibrary(SPUdll);
 	if (hSPUDriver == NULL) {
-		SPU_configure = NULL;
 		SysMessage (_("Could not load SPU plugin %s!"), SPUdll); return -1;
 	}
 	drv = hSPUDriver;
@@ -346,13 +332,8 @@ static int LoadSPUplugin(const char *SPUdll) {
 	LoadSpuSym1(shutdown, "SPUshutdown");
 	LoadSpuSym1(open, "SPUopen");
 	LoadSpuSym1(close, "SPUclose");
-	LoadSpuSym0(configure, "SPUconfigure");
-	LoadSpuSym0(about, "SPUabout");
-	LoadSpuSym0(test, "SPUtest");
 	LoadSpuSym1(writeRegister, "SPUwriteRegister");
 	LoadSpuSym1(readRegister, "SPUreadRegister");		
-	LoadSpuSym1(writeDMA, "SPUwriteDMA");
-	LoadSpuSym1(readDMA, "SPUreadDMA");
 	LoadSpuSym1(writeDMAMem, "SPUwriteDMAMem");
 	LoadSpuSym1(readDMAMem, "SPUreadDMAMem");
 	LoadSpuSym1(playADPCMchannel, "SPUplayADPCMchannel");
@@ -695,10 +676,6 @@ static int LoadSIO1plugin(const char *SIO1dll) {
 }
 
 #endif
-
-void CALLBACK clearDynarec(void) {
-	psxCpu->Reset();
-}
 
 int LoadPlugins() {
 	int ret;

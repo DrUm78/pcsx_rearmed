@@ -203,9 +203,6 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "PSX CPU Clock Speed",
       NULL,
       "Overclock or under-clock the PSX CPU. Try adjusting this if the game is too slow, too fast or hangs."
-#if defined(LIGHTREC)
-      " Currently doesn't work with Lightrec dynarec."
-#endif
 #if defined(HAVE_PRE_ARMV7) && !defined(_3DS)
       " Default is 50."
 #else
@@ -438,25 +435,70 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       },
       "auto",
    },
+   {
+      "pcsx_rearmed_screen_centering",
+      "(GPU) Screen centering",
+      NULL,
+      "The PSX has a feature allowing it to shift the image position on screen. Some (mostly PAL) games used this feature in a strange way making the image miscentered and causing borders to appear. With 'Auto' the emulator tries to correct this miscentering automatically. 'Game-controlled' uses the settings supplied by the game. 'Manual' allows to override those values with the settings below.",
+      NULL,
+      "video",
+      {
+         { "auto", "Auto" },
+         { "game", "Game-controlled" },
+         { "manual", "Manual" },
+         { NULL, NULL },
+      },
+      "auto",
+   },
+#define V(x) { #x, NULL }
+   {
+      "pcsx_rearmed_screen_centering_x",
+      "(GPU) Manual screen centering X",
+      NULL,
+      "X offset of the frame buffer. Only effective when 'Screen centering' is set to 'Manual'.",
+      NULL,
+      "video",
+      {
+         V(-16), V(-14), V(-12), V(-10), V(-8), V(-6), V(-4), V(-2), V(0), V(2), V(4), V(6), V(8), V(10), V(12), V(14), V(16),
+         { NULL, NULL },
+      },
+      "0",
+   },
+   {
+      "pcsx_rearmed_screen_centering_y",
+      "(GPU) Manual screen centering Y",
+      NULL,
+      "Y offset of the frame buffer. Only effective when 'Screen centering' is set to 'Manual'.",
+      NULL,
+      "video",
+      {
+         V(-16), V(-15), V(-14), V(-13), V(-12), V(-11), V(-10), V(-9), V(-8), V(-7), V(-6), V(-5), V(-4), V(-3), V(-2), V(-1),
+	 V(0), V(1), V(2), V(3), V(4), V(5), V(6), V(7), V(8), V(9), V(10), V(11), V(12), V(13), V(14), V(15), V(16),
+         { NULL, NULL },
+      },
+      "0",
+   },
+#undef V
 #ifdef GPU_NEON
    {
-      "pcsx_rearmed_neon_interlace_enable",
+      "pcsx_rearmed_neon_interlace_enable_v2",
       "(GPU) Show Interlaced Video",
       "Show Interlaced Video",
-      "When enabled, games that run in high resolution video modes (480i, 512i) will produced interlaced video output. While this displays correctly on CRT televisions, it will produce artifacts on modern displays. When disabled, all video is output in progressive format.",
+      "When enabled, games that run in high resolution video modes (480i, 512i) will produced interlaced video output. While this displays correctly on CRT televisions, it will produce artifacts on modern displays. When disabled, all video is output in progressive format. Note: there are games that will glitch is this is off.",
       NULL,
       "gpu_neon",
       {
+         { "auto", NULL },
          { "disabled", NULL },
          { "enabled",  NULL },
          { NULL, NULL },
       },
-      "disabled",
+      "auto",
    },
    {
       "pcsx_rearmed_neon_enhancement_enable",
-      "(GPU) Enhanced Resolution (Slow)",
-      "Enhanced Resolution (Slow)",
+      "(GPU) Enhanced Resolution",
+      "Enhanced Resolution",
       "Render games that do not already run in high resolution video modes (480i, 512i) at twice the native internal resolution. Improves the fidelity of 3D models at the expense of increased performance requirements. 2D elements are generally unaffected by this setting.",
       NULL,
       "gpu_neon",
@@ -471,7 +513,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "pcsx_rearmed_neon_enhancement_no_main",
       "(GPU) Enhanced Resolution Speed Hack",
       "Enhanced Resolution Speed Hack",
-      "Improves performance when 'Enhanced Resolution (Slow)' is enabled, but reduces compatibility and may cause rendering errors.",
+      "Improves performance when 'Enhanced Resolution' is enabled, but reduces compatibility and may cause rendering errors.",
       NULL,
       "gpu_neon",
       {
@@ -752,6 +794,22 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       },
       "enabled",
    },
+#if P_HAVE_PTHREAD
+   {
+      "pcsx_rearmed_spu_thread",
+      "Threaded SPU",
+      NULL,
+      "Emulates the PSX SPU on another CPU thread. May cause audio glitches in some games.",
+      NULL,
+      "audio",
+      {
+         { "disabled", NULL },
+         { "enabled",  NULL },
+         { NULL, NULL },
+      },
+      "disabled",
+   },
+#endif // P_HAVE_PTHREAD
    {
       "pcsx_rearmed_show_input_settings",
       "Show Input Settings",
@@ -1157,7 +1215,21 @@ struct retro_core_option_v2_definition option_defs_us[] = {
       "pcsx_rearmed_icache_emulation",
       "Instruction Cache Emulation",
       NULL,
-      "Enable emulation of the PSX CPU instruction cache. Improves accuracy at the expense of increased performance overheads. Required for Formula One 2001, Formula One Arcade and Formula One 99. [Interpreter only and partial on lightrec, unsupported when using ARMv7 backend]",
+      "Enable emulation of the PSX CPU instruction cache. Improves accuracy at the expense of increased performance overheads. Required for Formula One 2001, Formula One Arcade and Formula One 99. [Interpreter only; partial on lightrec and ARM dynarecs]",
+      NULL,
+      "compat_hack",
+      {
+         { "enabled",  NULL },
+         { "disabled", NULL },
+         { NULL, NULL },
+      },
+      "enabled",
+   },
+   {
+      "pcsx_rearmed_exception_emulation",
+      "Exception and Breakpoint Emulation",
+      NULL,
+      "Enable emulation of some almost never used PSX's debug features. This causes a performance hit, is not useful for games and is intended for PSX homebrew and romhack developers only. Only enable if you know what you are doing. [Interpreter only]",
       NULL,
       "compat_hack",
       {

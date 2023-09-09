@@ -15,6 +15,14 @@
 #ifndef PSX_GPU_H
 #define PSX_GPU_H
 
+#define MAX_SPANS             512
+#define MAX_BLOCKS            64
+#define MAX_BLOCKS_PER_ROW    128
+
+#define SPAN_DATA_BLOCKS_SIZE 32
+
+#ifndef __ASSEMBLER__
+
 #include "vector_types.h"
 
 typedef enum
@@ -69,7 +77,7 @@ typedef struct
   u16 y;
 } edge_data_struct;
 
-// 64 bytes total
+// 64 (72) bytes total
 typedef struct
 {
   // 16 bytes
@@ -93,19 +101,13 @@ typedef struct
     vec_8x16u pixels;
   };
 
-  // 8 bytes
+  // 8 (16) bytes
   u32 draw_mask_bits;
   u16 *fb_ptr;
 
   // 16 bytes
   vec_8x16u dither_offsets;  
 } block_struct;
-
-#define MAX_SPANS             512
-#define MAX_BLOCKS            64
-#define MAX_BLOCKS_PER_ROW    128
-
-#define SPAN_DATA_BLOCKS_SIZE 32
 
 typedef struct render_block_handler_struct render_block_handler_struct;
 
@@ -185,18 +187,22 @@ typedef struct
   u32 *reciprocal_table_ptr;
 
   // enhancement stuff
-  u16 *enhancement_buf_ptr;
-  u16 *enhancement_current_buf_ptr;
-  u32 enhancement_x_threshold;
+  u16 *enhancement_buf_ptr;          // main alloc
+  u16 *enhancement_current_buf_ptr;  // offset into above, 4 bufs
+  u32 saved_hres;
   s16 saved_viewport_start_x;
   s16 saved_viewport_start_y;
   s16 saved_viewport_end_x;
   s16 saved_viewport_end_y;
-  u8 enhancement_buf_by_x16[64];
+  u8  enhancement_buf_by_x16[64];    // 0-3 specifying which buf
+  u16 enhancement_buf_start[4];      // x pos where buf[n] begins
+
+  u16 enhancement_scanout_x[4];
+  u16 enhancement_scanout_select;
 
   // Align up to 64 byte boundary to keep the upcoming buffers cache line
   // aligned, also make reachable with single immediate addition
-  u8 reserved_a[160];
+  u8 reserved_a[142];
 
   // 8KB
   block_struct blocks[MAX_BLOCKS_PER_ROW];
@@ -256,5 +262,5 @@ void compute_all_gradients(psx_gpu_struct * __restrict__ psx_gpu,
  const vertex_struct * __restrict__ a, const vertex_struct * __restrict__ b,
  const vertex_struct * __restrict__ c);
 
-#endif
-
+#endif // __ASSEMBLER__
+#endif // PSX_GPU_H

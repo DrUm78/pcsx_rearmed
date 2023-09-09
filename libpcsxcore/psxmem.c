@@ -41,34 +41,47 @@
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
+static void * psxMapDefault(unsigned long addr, size_t size,
+			    int is_fixed, enum psxMapTag tag)
+{
+#if !P_HAVE_MMAP
+	void *ptr;
+
+	ptr = malloc(size);
+	return ptr ? ptr : MAP_FAILED;
+#else
+	int flags = MAP_PRIVATE | MAP_ANONYMOUS;
+
+	return mmap((void *)(uintptr_t)addr, size,
+		    PROT_READ | PROT_WRITE, flags, -1, 0);
+#endif
+}
+
+static void psxUnmapDefault(void *ptr, size_t size, enum psxMapTag tag)
+{
+#if !P_HAVE_MMAP
+	free(ptr);
+#else
+	munmap(ptr, size);
+#endif
+}
+
 void *(*psxMapHook)(unsigned long addr, size_t size, int is_fixed,
-		enum psxMapTag tag);
-void (*psxUnmapHook)(void *ptr, size_t size, enum psxMapTag tag);
+		enum psxMapTag tag) = psxMapDefault;
+void (*psxUnmapHook)(void *ptr, size_t size,
+		     enum psxMapTag tag) = psxUnmapDefault;
 
 void *psxMap(unsigned long addr, size_t size, int is_fixed,
 		enum psxMapTag tag)
 {
-	int flags = MAP_PRIVATE | MAP_ANONYMOUS;
 	int try_ = 0;
 	unsigned long mask;
-	void *req, *ret;
+	void *ret;
 
 retry:
-	if (psxMapHook != NULL) {
-		ret = psxMapHook(addr, size, 0, tag);
-		if (ret == NULL)
-			return MAP_FAILED;
-	}
-	else {
-		/* avoid MAP_FIXED, it overrides existing mappings.. */
-		/* if (is_fixed)
-			flags |= MAP_FIXED; */
-
-		req = (void *)(uintptr_t)addr;
-		ret = mmap(req, size, PROT_READ | PROT_WRITE, flags, -1, 0);
-		if (ret == MAP_FAILED)
-			return ret;
-	}
+	ret = psxMapHook(addr, size, 0, tag);
+	if (ret == NULL)
+		return MAP_FAILED;
 
 	if (addr != 0 && ret != (void *)(uintptr_t)addr) {
 		SysMessage("psxMap: warning: wanted to map @%08x, got %p\n",
@@ -97,13 +110,7 @@ retry:
 
 void psxUnmap(void *ptr, size_t size, enum psxMapTag tag)
 {
-	if (psxUnmapHook != NULL) {
-		psxUnmapHook(ptr, size, tag);
-		return;
-	}
-
-	if (ptr)
-		munmap(ptr, size);
+	psxUnmapHook(ptr, size, tag);
 }
 
 s8 *psxM = NULL; // Kernel & User Memory (2 Meg)
@@ -195,8 +202,8 @@ int psxMemInit(void)
 		return -1;
 	}
 
-	memset(psxMemRLUT, (uintptr_t)INVALID_PTR, 0x10000 * sizeof(void *));
-	memset(psxMemWLUT, (uintptr_t)INVALID_PTR, 0x10000 * sizeof(void *));
+	memset(psxMemRLUT, (int)(uintptr_t)INVALID_PTR, 0x10000 * sizeof(void *));
+	memset(psxMemWLUT, (int)(uintptr_t)INVALID_PTR, 0x10000 * sizeof(void *));
 
 // MemR
 	for (i = 0; i < 0x80; i++) psxMemRLUT[i + 0x0000] = (u8 *)&psxM[(i & 0x1f) << 16];
@@ -265,7 +272,22 @@ void psxMemShutdown() {
 	free(psxMemWLUT); psxMemWLUT = NULL;
 }
 
-static int writeok = 1;
+void psxMemOnIsolate(int enable)
+{
+	if (enable) {
+		memset(psxMemWLUT + 0x0000, (int)(uintptr_t)INVALID_PTR, 0x80 * sizeof(void *));
+		memset(psxMemWLUT + 0x8000, (int)(uintptr_t)INVALID_PTR, 0x80 * sizeof(void *));
+		//memset(psxMemWLUT + 0xa000, (int)(uintptr_t)INVALID_PTR, 0x80 * sizeof(void *));
+	} else {
+		int i;
+		for (i = 0; i < 0x80; i++)
+			psxMemWLUT[i + 0x0000] = (void *)&psxM[(i & 0x1f) << 16];
+		memcpy(psxMemWLUT + 0x8000, psxMemWLUT, 0x80 * sizeof(void *));
+		memcpy(psxMemWLUT + 0xa000, psxMemWLUT, 0x80 * sizeof(void *));
+	}
+	psxCpu->Notify(enable ? R3000ACPU_NOTIFY_CACHE_ISOLATED
+			: R3000ACPU_NOTIFY_CACHE_UNISOLATED, NULL);
+}
 
 u8 psxMemRead8(u32 mem) {
 	char *p;
@@ -334,8 +356,10 @@ u32 psxMemRead32(u32 mem) {
 				DebugCheckBP((mem & 0xffffff) | 0x80000000, R4);
 			return SWAPu32(*(u32 *)(p + (mem & 0xffff)));
 		} else {
+			if (mem == 0xfffe0130)
+				return psxRegs.biuReg;
 #ifdef PSXMEM_LOG
-			if (writeok) { PSXMEM_LOG("err lw %8.8lx\n", mem); }
+			PSXMEM_LOG("err lw %8.8lx\n", mem);
 #endif
 			return 0xFFFFFFFF;
 		}
@@ -417,44 +441,13 @@ void psxMemWrite32(u32 mem, u32 value) {
 			psxCpu->Clear(mem, 1);
 #endif
 		} else {
-			if (mem != 0xfffe0130) {
-#ifndef DRC_DISABLE
-				if (!writeok)
-					psxCpu->Clear(mem, 1);
-#endif
-
-#ifdef PSXMEM_LOG
-				if (writeok) { PSXMEM_LOG("err sw %8.8lx\n", mem); }
-#endif
-			} else {
-				int i;
-
-				switch (value) {
-					case 0x800: case 0x804:
-						if (writeok == 0) break;
-						writeok = 0;
-						memset(psxMemWLUT + 0x0000, (uintptr_t)INVALID_PTR, 0x80 * sizeof(void *));
-						memset(psxMemWLUT + 0x8000, (uintptr_t)INVALID_PTR, 0x80 * sizeof(void *));
-						memset(psxMemWLUT + 0xa000, (uintptr_t)INVALID_PTR, 0x80 * sizeof(void *));
-						/* Required for icache interpreter otherwise Armored Core won't boot on icache interpreter */
-						psxCpu->Notify(R3000ACPU_NOTIFY_CACHE_ISOLATED, NULL);
-						break;
-					case 0x00: case 0x1e988:
-						if (writeok == 1) break;
-						writeok = 1;
-						for (i = 0; i < 0x80; i++) psxMemWLUT[i + 0x0000] = (void *)&psxM[(i & 0x1f) << 16];
-						memcpy(psxMemWLUT + 0x8000, psxMemWLUT, 0x80 * sizeof(void *));
-						memcpy(psxMemWLUT + 0xa000, psxMemWLUT, 0x80 * sizeof(void *));
-						/* Dynarecs might take this opportunity to flush their code cache */
-						psxCpu->Notify(R3000ACPU_NOTIFY_CACHE_UNISOLATED, NULL);
-						break;
-					default:
-#ifdef PSXMEM_LOG
-						PSXMEM_LOG("unk %8.8lx = %x\n", mem, value);
-#endif
-						break;
-				}
+			if (mem == 0xfffe0130) {
+				psxRegs.biuReg = value;
+				return;
 			}
+#ifdef PSXMEM_LOG
+			PSXMEM_LOG("err sw %8.8lx\n", mem);
+#endif
 		}
 	}
 }
