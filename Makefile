@@ -45,7 +45,7 @@ endif
 OBJS += libpcsxcore/cdriso.o libpcsxcore/cdrom.o libpcsxcore/cheat.o libpcsxcore/database.o \
 	libpcsxcore/decode_xa.o libpcsxcore/mdec.o \
 	libpcsxcore/misc.o libpcsxcore/plugins.o libpcsxcore/ppf.o libpcsxcore/psxbios.o \
-	libpcsxcore/psxcommon.o libpcsxcore/psxcounters.o libpcsxcore/psxdma.o libpcsxcore/psxhle.o \
+	libpcsxcore/psxcommon.o libpcsxcore/psxcounters.o libpcsxcore/psxdma.o \
 	libpcsxcore/psxhw.o libpcsxcore/psxinterpreter.o libpcsxcore/psxmem.o libpcsxcore/r3000a.o \
 	libpcsxcore/sio.o libpcsxcore/spu.o
 OBJS += libpcsxcore/gte.o libpcsxcore/gte_nf.o libpcsxcore/gte_divider.o
@@ -170,12 +170,9 @@ OBJS += libchdr/deps/lzma-19.00/src/Alloc.o libchdr/deps/lzma-19.00/src/Bra86.o 
 OBJS += libchdr/deps/lzma-19.00/src/LzFind.o libchdr/deps/lzma-19.00/src/Lzma86Dec.o libchdr/deps/lzma-19.00/src/LzmaDec.o libchdr/deps/lzma-19.00/src/LzmaEnc.o libchdr/deps/lzma-19.00/src/Sort.o
 CFLAGS += -DHAVE_CHD -Ilibchdr/include
 libpcsxcore/cdriso.o: CFLAGS += -Wno-unused-function
-libchdr/src/%.o: CFLAGS += -Wno-unused -Ilibchdr/deps/lzma-19.00/include
+libchdr/src/%.o: CFLAGS += -Wno-unused -Ilibchdr/deps/lzma-19.00/include -std=gnu11
 libchdr/deps/lzma-19.00/src/%.o: CFLAGS += -Wno-unused -D_7ZIP_ST -Ilibchdr/deps/lzma-19.00/include
 #endif
-
-# dfinput
-OBJS += plugins/dfinput/main.o plugins/dfinput/pad.o plugins/dfinput/guncon.o
 
 # frontend/gui
 OBJS += frontend/cspace.o
@@ -268,8 +265,8 @@ CFLAGS += -DNO_FRONTEND
 endif
 
 # misc
-OBJS += frontend/main.o frontend/plugin.o frontend/configfile_fk.o 
-
+OBJS += frontend/main.o frontend/plugin.o frontend/configfile_fk.o
+frontend/main.o: CFLAGS += -DBUILTIN_GPU=$(BUILTIN_GPU)
 
 frontend/menu.o frontend/main.o: frontend/revision.h
 frontend/plat_sdl.o frontend/libretro.o: frontend/revision.h

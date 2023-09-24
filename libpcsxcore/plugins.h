@@ -76,6 +76,7 @@ typedef long (CALLBACK* GPUfreeze)(uint32_t, GPUFreeze_t *);
 typedef long (CALLBACK* GPUgetScreenPic)(unsigned char *);
 typedef long (CALLBACK* GPUshowScreenPic)(unsigned char *);
 typedef void (CALLBACK* GPUvBlank)(int, int);
+typedef void (CALLBACK* GPUgetScreenInfo)(int *, int *);
 
 // GPU function pointers
 extern GPUupdateLace    GPU_updateLace;
@@ -100,6 +101,7 @@ extern GPUfreeze        GPU_freeze;
 extern GPUgetScreenPic  GPU_getScreenPic;
 extern GPUshowScreenPic GPU_showScreenPic;
 extern GPUvBlank        GPU_vBlank;
+extern GPUgetScreenInfo GPU_getScreenInfo;
 
 // CD-ROM Functions
 typedef long (CALLBACK* CDRinit)(void);
@@ -216,7 +218,7 @@ typedef long (CALLBACK* PADreadPort1)(PadDataS*);
 typedef long (CALLBACK* PADreadPort2)(PadDataS*);
 typedef long (CALLBACK* PADkeypressed)(void);
 typedef unsigned char (CALLBACK* PADstartPoll)(int);
-typedef unsigned char (CALLBACK* PADpoll)(unsigned char);
+typedef unsigned char (CALLBACK* PADpoll)(unsigned char, int *);
 typedef void (CALLBACK* PADsetSensitive)(int);
 
 // PAD function pointers
@@ -378,6 +380,10 @@ void SetIsoFile(const char *filename);
 const char *GetIsoFile(void);
 boolean UsingIso(void);
 void SetCdOpenCaseTime(s64 time);
+
+extern void pl_gun_byte2(int port, unsigned char byte);
+extern void plat_trigger_vibrate(int pad, int low, int high);
+extern void plat_get_psx_resolution(int *xres, int *yres);
 
 #ifdef __cplusplus
 }

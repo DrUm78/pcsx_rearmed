@@ -23,6 +23,7 @@
 
 #include <assert.h>
 #include "cdrom.h"
+#include "misc.h"
 #include "ppf.h"
 #include "psxdma.h"
 #include "arm_features.h"
@@ -65,7 +66,8 @@ static struct {
 		unsigned char Absolute[3];
 	} subq;
 	unsigned char TrackChanged;
-	unsigned char unused3[3];
+	unsigned char ReportDelay;
+	unsigned char unused3[2];
 	unsigned int  freeze_ver;
 
 	unsigned char Prev[4];
@@ -109,7 +111,7 @@ static struct {
 	u8 DriveState;
 	u8 FastForward;
 	u8 FastBackward;
-	u8 unused8;
+	u8 errorRetryhack;
 
 	u8 AttenuatorLeftToLeft, AttenuatorLeftToRight;
 	u8 AttenuatorRightToRight, AttenuatorRightToLeft;
@@ -524,7 +526,9 @@ static void cdrPlayInterrupt_Autopause()
 		StopCdda();
 		SetPlaySeekRead(cdr.StatP, 0);
 	}
-	else if (((cdr.Mode & MODE_REPORT) || cdr.FastForward || cdr.FastBackward)) {
+	else if ((cdr.Mode & MODE_REPORT) && !cdr.ReportDelay &&
+		 ((cdr.subq.Absolute[2] & 0x0f) == 0 || cdr.FastForward || cdr.FastBackward))
+	{
 		cdr.Result[0] = cdr.StatP;
 		cdr.Result[1] = cdr.subq.Track;
 		cdr.Result[2] = cdr.subq.Index;
@@ -560,6 +564,9 @@ static void cdrPlayInterrupt_Autopause()
 		SetResultSize(8);
 		setIrq(0x1001);
 	}
+
+	if (cdr.ReportDelay)
+		cdr.ReportDelay--;
 }
 
 // LastReadCycles
@@ -749,6 +756,8 @@ void cdrInterrupt(void) {
 			if (((cdr.Param[0] & 0x0F) > 0x09) || (cdr.Param[0] > 0x99) || ((cdr.Param[1] & 0x0F) > 0x09) || (cdr.Param[1] >= 0x60) || ((cdr.Param[2] & 0x0F) > 0x09) || (cdr.Param[2] >= 0x75))
 			{
 				CDR_LOG_I("Invalid/out of range seek to %02X:%02X:%02X\n", cdr.Param[0], cdr.Param[1], cdr.Param[2]);
+				if (++cdr.errorRetryhack > 100)
+					break;
 				error = ERROR_INVALIDARG;
 				goto set_error;
 			}
@@ -759,6 +768,7 @@ void cdrInterrupt(void) {
 				memcpy(cdr.SetSector, set_loc, 3);
 				cdr.SetSector[3] = 0;
 				cdr.SetlocPending = 1;
+				cdr.errorRetryhack = 0;
 			}
 			break;
 
@@ -814,6 +824,7 @@ void cdrInterrupt(void) {
 			cdr.SubqForwardSectors = 1;
 			cdr.TrackChanged = FALSE;
 			cdr.FirstSector = 1;
+			cdr.ReportDelay = 60;
 
 			if (!Config.Cdda)
 				CDR_play(cdr.SetSectorPlay);

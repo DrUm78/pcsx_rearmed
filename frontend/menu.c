@@ -40,7 +40,6 @@
 #include "../libpcsxcore/cdriso.h"
 #include "../libpcsxcore/cheat.h"
 #include "../libpcsxcore/new_dynarec/new_dynarec.h"
-#include "../plugins/dfinput/externals.h"
 #include "../plugins/dfsound/spu_config.h"
 #include "psemu_plugin_defs.h"
 #include "arm_features.h"
@@ -1569,11 +1568,13 @@ static void menu_sync_config(void)
 	switch (in_type_sel1) {
 	case 1:  in_type[0] = PSE_PAD_TYPE_ANALOGPAD; break;
 	case 2:  in_type[0] = PSE_PAD_TYPE_NEGCON;    break;
+	case 3:  in_type[0] = PSE_PAD_TYPE_NONE;      break;
 	default: in_type[0] = PSE_PAD_TYPE_STANDARD;
 	}
 	switch (in_type_sel2) {
 	case 1:  in_type[1] = PSE_PAD_TYPE_ANALOGPAD; break;
 	case 2:  in_type[1] = PSE_PAD_TYPE_NEGCON;    break;
+	case 3:  in_type[1] = PSE_PAD_TYPE_NONE;      break;
 	default: in_type[1] = PSE_PAD_TYPE_STANDARD;
 	}
 	if (in_evdev_allow_abs_only != allow_abs_only_old) {
@@ -2468,6 +2469,7 @@ static const char *men_in_type_sel[] = {
 	"Standard (SCPH-1080)",
 	"Analog (SCPH-1150)",
 	"GunCon",
+	"None",
 	NULL
 };
 static const char h_nub_btns[] = "Experimental, keep this OFF if unsure. Select rescan after change.";
@@ -3994,8 +3996,6 @@ void menu_prepare_emu(void)
 		if (ret)
 			fprintf(stderr, "Warning: GPU_open returned %d\n", ret);
 	}
-
-	dfinput_activate();
 }
 
 void menu_update_msg(const char *msg)
